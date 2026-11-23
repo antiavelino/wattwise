@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" fill="none">
+  <defs>
+    <linearGradient id="og-bg" x1="0" y1="0" x2="1200" y2="630" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0B1714" />
+      <stop offset="50%" stop-color="#12382D" />
+      <stop offset="100%" stop-color="#0B1714" />
+    </linearGradient>
+    <radialGradient id="og-glow-center" cx="50%" cy="30%" r="60%">
+      <stop offset="0%" stop-color="#24B47E" stop-opacity="0.25" />
+      <stop offset="100%" stop-color="#0B1714" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="og-w-grad" x1="20" y1="20" x2="120" y2="120" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#24B47E" />
+      <stop offset="60%" stop-color="#34D399" />
+      <stop offset="100%" stop-color="#69E6AE" />
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="630" fill="url(#og-bg)" />
+  <rect width="1200" height="630" fill="url(#og-glow-center)" />
+
+  <!-- Grid overlay -->
+  <g opacity="0.08" stroke="#69E6AE" stroke-width="1">
+    <line x1="100" y1="0" x2="100" y2="630" />
+    <line x1="300" y1="0" x2="300" y2="630" />
+    <line x1="500" y1="0" x2="500" y2="630" />
+    <line x1="700" y1="0" x2="700" y2="630" />
+    <line x1="900" y1="0" x2="900" y2="630" />
+    <line x1="1100" y1="0" x2="1100" y2="630" />
+    <line x1="0" y1="100" x2="1200" y2="100" />
+    <line x1="0" y1="250" x2="1200" y2="250" />
+    <line x1="0" y1="400" x2="1200" y2="400" />
+    <line x1="0" y1="550" x2="1200" y2="550" />
+  </g>
+
+  <!-- Card Container -->
+  <g transform="translate(100, 110)">
+    <!-- Brand Mark -->
+    <g transform="scale(2.2)">
+      <path
+        d="M7 11.5C7 10.67 7.67 10 8.5 10H14.2C15.08 10 15.84 10.6 16.05 11.45L20.8 30.6L24.8 14.5C25.01 13.65 25.77 13.05 26.65 13.05H29.5C30.38 13.05 31.14 13.65 31.35 14.5L35.35 30.6L40.1 11.45C40.31 10.6 41.07 10 41.95 10H47.5C48.33 10 49 10.67 49 11.5V12C49 12.35 48.88 12.69 48.66 12.96L39.4 39.5C39.12 40.35 38.32 41 37.4 41H34.2C33.28 41 32.48 40.35 32.2 39.5L28 22.5L23.8 39.5C23.52 40.35 22.72 41 21.8 41H18.6C17.68 41 16.88 40.35 16.6 39.5L7.34 12.96C7.12 12.69 7 12.35 7 12V11.5Z"
+        fill="url(#og-w-grad)"
+      />
+      <circle cx="41.5" cy="7.5" r="3" fill="#C8F36B" />
+    </g>
+
+    <!-- Typography -->
+    <text x="130" y="65" font-family="'Manrope', -apple-system, sans-serif" font-weight="800" font-size="58" letter-spacing="-1">
+      <tspan fill="#FFFFFF">Watt</tspan><tspan fill="#24B47E">Wise</tspan>
+    </text>
+
+    <text x="135" y="100" font-family="'IBM Plex Mono', monospace" font-weight="600" font-size="16" letter-spacing="3.5" fill="#69E6AE">
+      SMART ENERGY INTELLIGENCE
+    </text>
+
+    <!-- Headline -->
+    <text x="0" y="190" font-family="'Manrope', -apple-system, sans-serif" font-weight="700" font-size="42" fill="#F2F6F2" letter-spacing="-0.5">
+      Monitoramento e Análise Inteligente de Energia
+    </text>
+
+    <!-- Description -->
+    <text x="0" y="245" font-family="'Manrope', -apple-system, sans-serif" font-weight="400" font-size="22" fill="#82918A">
+      Inteligência analítica, detecção de anomalias, redução de custos e métricas ESG
+    </text>
+    <text x="0" y="280" font-family="'Manrope', -apple-system, sans-serif" font-weight="400" font-size="22" fill="#82918A">
+      em um SaaS escalável e seguro para instituições e empresas.
+    </text>
+
+    <!-- Telemetry Badges -->
+    <g transform="translate(0, 340)">
+      <rect width="210" height="42" rx="21" fill="#18221F" stroke="#24B47E" stroke-opacity="0.4" />
+      <text x="20" y="26" font-family="'IBM Plex Mono', monospace" font-weight="500" font-size="14" fill="#C8F36B">
+        ⚡ DETECÇÃO Z-SCORE
+      </text>
+
+      <rect x="230" width="220" height="42" rx="21" fill="#18221F" stroke="#24B47E" stroke-opacity="0.4" />
+      <text x="250" y="26" font-family="'IBM Plex Mono', monospace" font-weight="500" font-size="14" fill="#69E6AE">
+        🌱 IMPACTO ESG EM CO2e
+      </text>
+
+      <rect x="470" width="220" height="42" rx="21" fill="#18221F" stroke="#24B47E" stroke-opacity="0.4" />
+      <text x="490" y="26" font-family="'IBM Plex Mono', monospace" font-weight="500" font-size="14" fill="#F2F6F2">
+        🔒 MULTI-TENANT RLS
+      </text>
+    </g>
+  </g>
+</svg>

@@ -1,0 +1,149 @@
+:root {
+  /* =========================================================================
+     PRECISION ECO-TECH PALETTE — WATTWISE BRAND FOUNDATION
+     Deep Forest (#0B1714), Forest Green (#12382D), Energy Green (#24B47E),
+     Electric Mint (#69E6AE), Lime Signal (#C8F36B), Carbon (#18221F),
+     Slate (#82918A), Cloud (#F2F6F2), White (#FFFFFF)
+     ========================================================================= */
+
+  /* Palette Primitives */
+  --color-deep-forest: #0B1714;
+  --color-forest-green: #12382D;
+  --color-energy-green: #24B47E;
+  --color-electric-mint: #69E6AE;
+  --color-lime-signal: #C8F36B;
+  --color-carbon: #18221F;
+  --color-slate: #82918A;
+  --color-cloud: #F2F6F2;
+  --color-white: #FFFFFF;
+
+  /* Typography */
+  --font-sans: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'IBM Plex Mono', 'Cascadia Code', 'Fira Code', 'Courier New', monospace;
+
+  /* Spacing & Radii */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-pill: 999px;
+
+  /* Layout Dimensions */
+  --sidebar-width: 264px;
+  --topbar-height: 74px;
+
+  /* Motion */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-fast: 150ms var(--ease-out);
+  --transition-base: 220ms var(--ease-out);
+  --transition-smooth: 320ms var(--ease-out);
+
+  /* Status Colors (Shared) */
+  --sky-400: #38bdf8;
+  --sky-soft: rgba(56, 189, 248, 0.12);
+  --sky-border: rgba(56, 189, 248, 0.28);
+
+  --amber-400: #fbbf24;
+  --amber-500: #f59e0b;
+  --amber-soft: rgba(245, 158, 11, 0.14);
+  --amber-border: rgba(245, 158, 11, 0.32);
+
+  --red-400: #f87171;
+  --red-500: #ef4444;
+  --red-soft: rgba(239, 68, 68, 0.14);
+  --red-border: rgba(239, 68, 68, 0.32);
+
+  --indigo-300: #a5b4fc;
+  --indigo-soft: rgba(99, 102, 241, 0.14);
+  --indigo-border: rgba(129, 140, 248, 0.3);
+
+  /* =========================================================================
+     DARK THEME (Primary / Default)
+     ========================================================================= */
+  --bg-canvas: #0B1714;
+  --bg-sidebar: #07100D;
+  --bg-surface: #102620;
+  --bg-surface-elevated: #16332B;
+  --bg-input: #0D1F1A;
+  --bg-backdrop: rgba(7, 16, 13, 0.82);
+
+  /* Borders */
+  --border-subtle: rgba(130, 145, 138, 0.16);
+  --border-default: rgba(130, 145, 138, 0.24);
+  --border-strong: rgba(105, 230, 174, 0.36);
+
+  /* Text */
+  --text-primary: #F2F6F2;
+  --text-secondary: #9EB0A7;
+  --text-muted: #6D7E76;
+
+  /* Accents */
+  --brand-primary: #24B47E;
+  --brand-secondary: #69E6AE;
+  --brand-accent: #C8F36B;
+
+  --emerald-400: #69E6AE;
+  --emerald-500: #24B47E;
+  --emerald-600: #12382D;
+  --emerald-soft: rgba(36, 180, 126, 0.14);
+  --emerald-border: rgba(36, 180, 126, 0.35);
+
+  /* Shadows */
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.35), 0 4px 12px rgba(0, 0, 0, 0.2);
+  --shadow-modal: 0 24px 48px -12px rgba(0, 0, 0, 0.75);
+  --shadow-toast: 0 16px 32px -8px rgba(0, 0, 0, 0.65);
+}
+
+/* =========================================================================
+   LIGHT THEME (Complete Bespoke Experience)
+   ========================================================================= */
+[data-theme="light"],
+body.theme-light {
+  --bg-canvas: #F4F8F5;
+  --bg-sidebar: #FFFFFF;
+  --bg-surface: #FFFFFF;
+  --bg-surface-elevated: #F9FCFA;
+  --bg-input: #EBF3EE;
+  --bg-backdrop: rgba(11, 23, 20, 0.48);
+
+  /* Borders */
+  --border-subtle: rgba(18, 56, 45, 0.08);
+  --border-default: rgba(18, 56, 45, 0.16);
+  --border-strong: rgba(21, 140, 94, 0.38);
+
+  /* Text */
+  --text-primary: #0B1714;
+  --text-secondary: #2C4239;
+  --text-muted: #577064;
+
+  /* Accents (Tuned for contrast on light canvas) */
+  --brand-primary: #158C5E;
+  --brand-secondary: #0D6E48;
+  --brand-accent: #2B6B08;
+
+  --emerald-400: #158C5E;
+  --emerald-500: #158C5E;
+  --emerald-600: #0D6E48;
+  --emerald-soft: rgba(21, 140, 94, 0.11);
+  --emerald-border: rgba(21, 140, 94, 0.32);
+
+  /* Status on Light */
+  --sky-400: #0284c7;
+  --sky-soft: rgba(2, 132, 199, 0.11);
+  --sky-border: rgba(2, 132, 199, 0.26);
+
+  --amber-400: #d97706;
+  --amber-500: #b45309;
+  --amber-soft: rgba(217, 119, 6, 0.12);
+  --amber-border: rgba(217, 119, 6, 0.28);
+
+  --red-400: #dc2626;
+  --red-500: #b91c1c;
+  --red-soft: rgba(220, 38, 38, 0.11);
+  --red-border: rgba(220, 38, 38, 0.28);
+
+  /* Shadows */
+  --shadow-card: 0 1px 3px rgba(11, 23, 20, 0.06), 0 4px 16px -2px rgba(11, 23, 20, 0.05);
+  --shadow-modal: 0 20px 40px -8px rgba(11, 23, 20, 0.22);
+  --shadow-toast: 0 12px 28px -6px rgba(11, 23, 20, 0.18);
+}

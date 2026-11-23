@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 50" fill="none">
+  <defs>
+    <linearGradient id="logo-dark-w-grad" x1="6" y1="8" x2="42" y2="40" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#24B47E" />
+      <stop offset="60%" stop-color="#34D399" />
+      <stop offset="100%" stop-color="#69E6AE" />
+    </linearGradient>
+    <filter id="logo-dark-glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="1.5" stdDeviation="2.5" flood-color="#24B47E" flood-opacity="0.35" />
+    </filter>
+  </defs>
+
+  <!-- Symbol -->
+  <g transform="translate(0, 5) scale(0.83)" filter="url(#logo-dark-glow)">
+    <path
+      d="M7 11.5C7 10.67 7.67 10 8.5 10H14.2C15.08 10 15.84 10.6 16.05 11.45L20.8 30.6L24.8 14.5C25.01 13.65 25.77 13.05 26.65 13.05H29.5C30.38 13.05 31.14 13.65 31.35 14.5L35.35 30.6L40.1 11.45C40.31 10.6 41.07 10 41.95 10H47.5C48.33 10 49 10.67 49 11.5V12C49 12.35 48.88 12.69 48.66 12.96L39.4 39.5C39.12 40.35 38.32 41 37.4 41H34.2C33.28 41 32.48 40.35 32.2 39.5L28 22.5L23.8 39.5C23.52 40.35 22.72 41 21.8 41H18.6C17.68 41 16.88 40.35 16.6 39.5L7.34 12.96C7.12 12.69 7 12.35 7 12V11.5Z"
+      fill="url(#logo-dark-w-grad)"
+    />
+    <circle cx="41.5" cy="7.5" r="2.5" fill="#C8F36B" />
+  </g>
+
+  <!-- Wordmark -->
+  <text x="50" y="27" font-family="'Manrope', 'Segoe UI', -apple-system, sans-serif" font-weight="800" font-size="22" letter-spacing="-0.5">
+    <tspan fill="#FFFFFF">Watt</tspan><tspan fill="#24B47E">Wise</tspan>
+  </text>
+
+  <!-- Tagline / Subtitle -->
+  <text x="51" y="41" font-family="'IBM Plex Mono', 'Segoe UI Mono', monospace" font-weight="600" font-size="7" letter-spacing="1.8" fill="#82918A">
+    SMART ENERGY INTELLIGENCE
+  </text>
+</svg>
