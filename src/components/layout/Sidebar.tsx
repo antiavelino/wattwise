@@ -3,6 +3,7 @@ import {
   Activity,
   AlertTriangle,
   BellRing,
+  BookOpen,
   Cpu,
   FileBarChart2,
   FileSpreadsheet,
@@ -15,8 +16,9 @@ import {
   Sun,
   X,
 } from 'lucide-react';
-import { useWattWise } from '../../context/WattWiseContext';
-import { NavSection } from '../../types/energy';
+import { SECTION_TO_PATH, useWattWise } from '../../context/WattWiseContext';
+import { DEMO_SCENARIO_LIST } from '../../data/demoData';
+import { DemoScenarioId, NavSection } from '../../types/energy';
 import { formatPower } from '../../utils/formatters';
 
 interface SidebarProps {
@@ -33,44 +35,56 @@ const NAV_ITEMS: Array<{
   {
     id: 'dashboard',
     label: 'Dashboard',
-    description: 'Indicadores e análise',
+    description: 'Painel geral (/dashboard)',
     icon: Activity,
+  },
+  {
+    id: 'demos',
+    label: 'Demonstrações',
+    description: '4 cenários (/demonstracoes)',
+    icon: FlaskConical,
   },
   {
     id: 'equipment',
     label: 'Equipamentos',
-    description: 'Potência e status',
+    description: 'Fichas e potências (/equipamentos)',
     icon: Cpu,
   },
   {
     id: 'records',
     label: 'Registros',
-    description: 'Consumo diário (kWh)',
+    description: 'Histórico diário (/registros)',
     icon: FileBarChart2,
   },
   {
     id: 'analysis',
     label: 'Análises',
-    description: 'Previsão e evidências',
+    description: 'Mensal e projeção (/analises)',
     icon: LineChart,
   },
   {
     id: 'alerts',
     label: 'Alertas',
-    description: 'Anomalias e tratativas',
+    description: 'Diagnóstico e ações (/alertas)',
     icon: BellRing,
   },
   {
     id: 'reports',
     label: 'Relatórios',
-    description: 'CSV, JSON e PDF',
+    description: 'CSV, JSON e PDF (/relatorios)',
     icon: FileSpreadsheet,
   },
   {
     id: 'settings',
     label: 'Configurações',
-    description: 'Tarifa e alertas',
+    description: 'Tarifa ANEEL e tema (/configuracoes)',
     icon: Settings,
+  },
+  {
+    id: 'about',
+    label: 'Guia & Fórmulas',
+    description: 'Explicação técnica (/sobre)',
+    icon: BookOpen,
   },
 ];
 
@@ -83,11 +97,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
     setSelectedEquipmentId,
     state,
     analysis,
-    workspaceMode,
-    activeOrganization,
-    userOrganizations,
-    switchOrganization,
-    activeRole,
+    activeScenarioId,
+    activeScenarioMeta,
+    switchScenario,
     navigatePublic,
     restoreDemoData,
   } = useWattWise();
@@ -97,6 +109,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
     setSelectedEquipmentId(null);
     onCloseMobile();
   };
+
+  const openAlertsCount = analysis.systemAlerts.filter((a) => a.status !== 'resolved').length;
 
   return (
     <>
@@ -117,10 +131,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
             className="brand"
             onClick={() => navigatePublic('home')}
             style={{ cursor: 'pointer' }}
-            title="Ir para a página inicial"
+            title="Ir para a página inicial (/)"
           >
             <img
-              src={theme === 'light' ? '/brand/wattwise-logo-light.svg' : '/brand/wattwise-logo-dark.svg'}
+              src={
+                theme === 'light'
+                  ? '/brand/wattwise-logo-light.svg'
+                  : '/brand/wattwise-logo-dark.svg'
+              }
               alt="WattWise — Smart Energy Intelligence"
               height="36"
               style={{ height: '36px', width: 'auto' }}
@@ -137,46 +155,52 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
           </button>
         </div>
 
-        {workspaceMode === 'saas' && userOrganizations.length > 1 && activeOrganization && (
-          <div style={{ marginBottom: 12 }}>
-            <select
-              className="form-input"
-              value={activeOrganization.id}
-              onChange={(e) => switchOrganization(e.target.value)}
-              aria-label="Alternar organização ativa"
-            >
-              {userOrganizations.map(({ organization, role }) => (
-                <option key={organization.id} value={organization.id}>
-                  {organization.name} ({role.toUpperCase()})
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
+        {/* Seletor Rápido dos 4 Cenários Demonstrativos */}
+        <div className="sidebar-scenario-switcher">
+          <label htmlFor="sidebar-scenario-select" className="sidebar-scenario-label">
+            Cenário Demonstrativo Ativo
+          </label>
+          <select
+            id="sidebar-scenario-select"
+            className="form-input form-input--sm"
+            value={activeScenarioId}
+            onChange={(e) => switchScenario(e.target.value as DemoScenarioId)}
+            aria-label="Selecionar cenário demonstrativo"
+          >
+            {DEMO_SCENARIO_LIST.map((sc) => (
+              <option key={sc.id} value={sc.id}>
+                {sc.shortLabel} ({sc.segment.split('&')[0].trim()})
+              </option>
+            ))}
+          </select>
+        </div>
 
-        <nav className="sidebar-nav">
+        <nav className="sidebar-nav" aria-label="Páginas do sistema">
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
             const isActive = activeSection === item.id;
-            const openAnomaliesCount = analysis.anomalies.filter(
-              (a) => a.status !== 'resolved',
-            ).length;
+            const href = SECTION_TO_PATH[item.id];
 
             const badgeCount =
-              (item.id === 'dashboard' || item.id === 'alerts') && openAnomaliesCount > 0
-                ? openAnomaliesCount
-                : item.id === 'equipment'
-                  ? analysis.activeEquipmentCount
-                  : item.id === 'records'
-                    ? analysis.totalRecords
-                    : null;
+              item.id === 'alerts' && openAlertsCount > 0
+                ? openAlertsCount
+                : item.id === 'demos'
+                  ? 4
+                  : item.id === 'equipment'
+                    ? analysis.activeEquipmentCount
+                    : item.id === 'records'
+                      ? analysis.totalRecords
+                      : null;
 
             return (
-              <button
+              <a
                 key={item.id}
-                type="button"
+                href={href}
                 className={`nav-item ${isActive ? 'nav-item--active' : ''}`}
-                onClick={() => handleSelect(item.id)}
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleSelect(item.id);
+                }}
                 aria-current={isActive ? 'page' : undefined}
               >
                 <span className="nav-item-icon" aria-hidden="true">
@@ -189,17 +213,16 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
                 {badgeCount !== null && (
                   <span
                     className={`nav-item-pill ${
-                      (item.id === 'dashboard' || item.id === 'alerts') && openAnomaliesCount > 0
-                        ? 'nav-item-pill--alert'
-                        : ''
+                      item.id === 'alerts' && openAlertsCount > 0 ? 'nav-item-pill--alert' : ''
                     }`}
                   >
-                    {(item.id === 'dashboard' || item.id === 'alerts') &&
-                      openAnomaliesCount > 0 && <AlertTriangle size={11} aria-hidden="true" />}
+                    {item.id === 'alerts' && openAlertsCount > 0 && (
+                      <AlertTriangle size={11} aria-hidden="true" />
+                    )}
                     {badgeCount}
                   </span>
                 )}
-              </button>
+              </a>
             );
           })}
         </nav>
@@ -208,23 +231,19 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
           <div className="establishment-card">
             <div className="establishment-header">
               <span className="establishment-label">
-                {workspaceMode === 'saas'
-                  ? `PERFIL: ${activeRole.toUpperCase()}`
-                  : 'Modo Demonstração'}
+                CENÁRIO: {activeScenarioMeta.shortLabel.toUpperCase()}
               </span>
-              {analysis.hasDemoData && (
-                <span className="demo-mini-tag" title="Contém dados simulados para demonstração">
-                  <FlaskConical size={11} aria-hidden="true" />
-                  Demo
-                </span>
-              )}
+              <span className="demo-mini-tag" title="Histórico simulado coerente com equipamentos reais">
+                <FlaskConical size={11} aria-hidden="true" />
+                Simulado
+              </span>
             </div>
             <p className="establishment-name" title={state.settings.establishmentName}>
               {state.settings.establishmentName}
             </p>
             <div className="establishment-meta">
               <span>Tarifa: R$ {state.settings.tariffPerKwh.toFixed(2).replace('.', ',')}/kWh</span>
-              <span>Carga ativa: {formatPower(analysis.activeInstalledPowerWatts)}</span>
+              <span>Potência ativa: {formatPower(analysis.activeInstalledPowerWatts)}</span>
             </div>
           </div>
 
@@ -238,7 +257,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
               aria-label="Alternar tema visual"
             >
               {theme === 'dark' ? <Sun size={13} /> : <Moon size={13} />}
-              <span>{theme === 'dark' ? 'Tema Claro' : 'Tema Escuro'}</span>
+              <span>{theme === 'dark' ? 'Claro' : 'Escuro'}</span>
             </button>
 
             <button
@@ -246,6 +265,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
               className="text-action-btn"
               style={{ flex: 1, justifyContent: 'center' }}
               onClick={() => navigatePublic('home')}
+              title="Voltar para a página inicial (/)"
             >
               <Globe size={13} />
               <span>Início</span>
@@ -256,7 +276,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
               className="text-action-btn"
               style={{ flex: 1, justifyContent: 'center' }}
               onClick={restoreDemoData}
-              title="Restaurar dados originais da demonstração"
+              title={`Restaurar somente o cenário ${activeScenarioMeta.shortLabel}`}
             >
               <RotateCcw size={13} />
               <span>Restaurar</span>

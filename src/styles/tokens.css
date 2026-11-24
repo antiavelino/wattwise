@@ -29,7 +29,7 @@
   --radius-pill: 999px;
 
   /* Layout Dimensions */
-  --sidebar-width: 264px;
+  --sidebar-width: 268px;
   --topbar-height: 74px;
 
   /* Motion */
@@ -38,44 +38,29 @@
   --transition-base: 220ms var(--ease-out);
   --transition-smooth: 320ms var(--ease-out);
 
-  /* Status Colors (Shared) */
-  --sky-400: #38bdf8;
-  --sky-soft: rgba(56, 189, 248, 0.12);
-  --sky-border: rgba(56, 189, 248, 0.28);
-
-  --amber-400: #fbbf24;
-  --amber-500: #f59e0b;
-  --amber-soft: rgba(245, 158, 11, 0.14);
-  --amber-border: rgba(245, 158, 11, 0.32);
-
-  --red-400: #f87171;
-  --red-500: #ef4444;
-  --red-soft: rgba(239, 68, 68, 0.14);
-  --red-border: rgba(239, 68, 68, 0.32);
-
-  --indigo-300: #a5b4fc;
-  --indigo-soft: rgba(99, 102, 241, 0.14);
-  --indigo-border: rgba(129, 140, 248, 0.3);
-
   /* =========================================================================
-     DARK THEME (Primary / Default)
+     DARK THEME (Eco-Tech Telemetry Mode)
      ========================================================================= */
   --bg-canvas: #0B1714;
   --bg-sidebar: #07100D;
+  --bg-topbar: rgba(7, 16, 13, 0.86);
   --bg-surface: #102620;
   --bg-surface-elevated: #16332B;
+  --bg-surface-inset: rgba(7, 16, 13, 0.65);
   --bg-input: #0D1F1A;
   --bg-backdrop: rgba(7, 16, 13, 0.82);
+  --bg-hover-subtle: rgba(148, 163, 184, 0.08);
 
   /* Borders */
   --border-subtle: rgba(130, 145, 138, 0.16);
-  --border-default: rgba(130, 145, 138, 0.24);
-  --border-strong: rgba(105, 230, 174, 0.36);
+  --border-default: rgba(130, 145, 138, 0.26);
+  --border-strong: rgba(105, 230, 174, 0.38);
 
   /* Text */
   --text-primary: #F2F6F2;
-  --text-secondary: #9EB0A7;
-  --text-muted: #6D7E76;
+  --text-secondary: #A7B8B0;
+  --text-muted: #768880;
+  --text-on-primary: #042016;
 
   /* Accents */
   --brand-primary: #24B47E;
@@ -85,8 +70,27 @@
   --emerald-400: #69E6AE;
   --emerald-500: #24B47E;
   --emerald-600: #12382D;
-  --emerald-soft: rgba(36, 180, 126, 0.14);
-  --emerald-border: rgba(36, 180, 126, 0.35);
+  --emerald-soft: rgba(36, 180, 126, 0.15);
+  --emerald-border: rgba(36, 180, 126, 0.38);
+
+  /* Status Colors (Dark) */
+  --sky-400: #38bdf8;
+  --sky-soft: rgba(56, 189, 248, 0.13);
+  --sky-border: rgba(56, 189, 248, 0.3);
+
+  --amber-400: #fbbf24;
+  --amber-500: #f59e0b;
+  --amber-soft: rgba(245, 158, 11, 0.15);
+  --amber-border: rgba(245, 158, 11, 0.34);
+
+  --red-400: #f87171;
+  --red-500: #ef4444;
+  --red-soft: rgba(239, 68, 68, 0.15);
+  --red-border: rgba(239, 68, 68, 0.34);
+
+  --indigo-300: #a5b4fc;
+  --indigo-soft: rgba(99, 102, 241, 0.15);
+  --indigo-border: rgba(129, 140, 248, 0.32);
 
   /* Shadows */
   --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.35), 0 4px 12px rgba(0, 0, 0, 0.2);
@@ -95,55 +99,63 @@
 }
 
 /* =========================================================================
-   LIGHT THEME (Complete Bespoke Experience)
+   LIGHT THEME (Complete Bespoke Professional Editorial & Engineering UI)
    ========================================================================= */
 [data-theme="light"],
 body.theme-light {
-  --bg-canvas: #F4F8F5;
+  --bg-canvas: #F8FAFC;
   --bg-sidebar: #FFFFFF;
+  --bg-topbar: rgba(255, 255, 255, 0.92);
   --bg-surface: #FFFFFF;
-  --bg-surface-elevated: #F9FCFA;
-  --bg-input: #EBF3EE;
-  --bg-backdrop: rgba(11, 23, 20, 0.48);
+  --bg-surface-elevated: #F1F5F9;
+  --bg-surface-inset: #F8FAFC;
+  --bg-input: #FFFFFF;
+  --bg-backdrop: rgba(15, 23, 42, 0.45);
+  --bg-hover-subtle: rgba(15, 23, 42, 0.04);
 
   /* Borders */
-  --border-subtle: rgba(18, 56, 45, 0.08);
-  --border-default: rgba(18, 56, 45, 0.16);
-  --border-strong: rgba(21, 140, 94, 0.38);
+  --border-subtle: #E2E8F0;
+  --border-default: #CBD5E1;
+  --border-strong: #0D7A52;
 
   /* Text */
-  --text-primary: #0B1714;
-  --text-secondary: #2C4239;
-  --text-muted: #577064;
+  --text-primary: #0F172A;
+  --text-secondary: #334155;
+  --text-muted: #64748B;
+  --text-on-primary: #FFFFFF;
 
-  /* Accents (Tuned for contrast on light canvas) */
-  --brand-primary: #158C5E;
-  --brand-secondary: #0D6E48;
-  --brand-accent: #2B6B08;
+  /* Accents (Tuned for high WCAG AA/AAA contrast on white cards) */
+  --brand-primary: #0D7A52;
+  --brand-secondary: #065F46;
+  --brand-accent: #15803D;
 
-  --emerald-400: #158C5E;
-  --emerald-500: #158C5E;
-  --emerald-600: #0D6E48;
-  --emerald-soft: rgba(21, 140, 94, 0.11);
-  --emerald-border: rgba(21, 140, 94, 0.32);
+  --emerald-400: #0D7A52;
+  --emerald-500: #0F8A5F;
+  --emerald-600: #065F46;
+  --emerald-soft: rgba(15, 138, 95, 0.1);
+  --emerald-border: rgba(15, 138, 95, 0.3);
 
   /* Status on Light */
-  --sky-400: #0284c7;
-  --sky-soft: rgba(2, 132, 199, 0.11);
-  --sky-border: rgba(2, 132, 199, 0.26);
+  --sky-400: #0369A1;
+  --sky-soft: rgba(2, 132, 199, 0.09);
+  --sky-border: rgba(2, 132, 199, 0.25);
 
-  --amber-400: #d97706;
-  --amber-500: #b45309;
-  --amber-soft: rgba(217, 119, 6, 0.12);
+  --amber-400: #B45309;
+  --amber-500: #D97706;
+  --amber-soft: rgba(217, 119, 6, 0.1);
   --amber-border: rgba(217, 119, 6, 0.28);
 
-  --red-400: #dc2626;
-  --red-500: #b91c1c;
-  --red-soft: rgba(220, 38, 38, 0.11);
-  --red-border: rgba(220, 38, 38, 0.28);
+  --red-400: #B91C1C;
+  --red-500: #DC2626;
+  --red-soft: rgba(220, 38, 38, 0.09);
+  --red-border: rgba(220, 38, 38, 0.26);
+
+  --indigo-300: #4338CA;
+  --indigo-soft: rgba(67, 56, 202, 0.08);
+  --indigo-border: rgba(67, 56, 202, 0.22);
 
   /* Shadows */
-  --shadow-card: 0 1px 3px rgba(11, 23, 20, 0.06), 0 4px 16px -2px rgba(11, 23, 20, 0.05);
-  --shadow-modal: 0 20px 40px -8px rgba(11, 23, 20, 0.22);
-  --shadow-toast: 0 12px 28px -6px rgba(11, 23, 20, 0.18);
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 12px -2px rgba(15, 23, 42, 0.05);
+  --shadow-modal: 0 20px 40px -10px rgba(15, 23, 42, 0.18);
+  --shadow-toast: 0 12px 24px -6px rgba(15, 23, 42, 0.14);
 }

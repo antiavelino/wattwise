@@ -7,11 +7,14 @@ import {
 
 export interface EquipmentValidationErrors {
   name?: string;
+  manufacturer?: string;
+  model?: string;
   category?: string;
   location?: string;
   powerWatts?: string;
   quantity?: string;
   dailyUsageHours?: string;
+  usageFactor?: string;
   status?: string;
 }
 
@@ -60,12 +63,14 @@ export function validateEquipmentInput(input: {
   location?: string;
   quantityRaw?: string;
   dailyUsageHoursRaw?: string;
+  usageFactorRaw?: string;
 }): {
   isValid: boolean;
   errors: EquipmentValidationErrors;
   parsedPowerWatts: number;
   parsedQuantity: number;
   parsedDailyUsageHours: number;
+  parsedUsageFactor: number;
 } {
   const errors: EquipmentValidationErrors = {};
   const trimmedName = input.name.trim();
@@ -117,6 +122,19 @@ export function validateEquipmentInput(input: {
     }
   }
 
+  let parsedUsageFactor = 1;
+  if (input.usageFactorRaw !== undefined && input.usageFactorRaw.trim() !== '') {
+    parsedUsageFactor = parseNumericInput(input.usageFactorRaw);
+    if (
+      Number.isNaN(parsedUsageFactor) ||
+      !Number.isFinite(parsedUsageFactor) ||
+      parsedUsageFactor < 0.05 ||
+      parsedUsageFactor > 1
+    ) {
+      errors.usageFactor = 'O fator de operação deve estar entre 0,05 (5%) e 1,00 (100%).';
+    }
+  }
+
   if (input.status !== 'active' && input.status !== 'inactive') {
     errors.status = 'Selecione um status válido.';
   }
@@ -127,6 +145,7 @@ export function validateEquipmentInput(input: {
     parsedPowerWatts: Math.round(parsedPower),
     parsedQuantity: Math.max(1, Math.round(parsedQuantity || 1)),
     parsedDailyUsageHours: Math.round((parsedDailyUsageHours || 0) * 10) / 10,
+    parsedUsageFactor: Math.round(Math.min(1, Math.max(0.05, parsedUsageFactor || 1)) * 100) / 100,
   };
 }
 

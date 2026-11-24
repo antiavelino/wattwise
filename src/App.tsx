@@ -6,6 +6,7 @@ import { Sidebar } from './components/layout/Sidebar';
 import { Header } from './components/layout/Header';
 import { DemoBanner } from './components/layout/DemoBanner';
 import { DashboardView } from './components/dashboard/DashboardView';
+import { DemosView } from './components/demos/DemosView';
 import { EquipmentView } from './components/equipment/EquipmentView';
 import { EquipmentFormModal } from './components/equipment/EquipmentFormModal';
 import { RecordsView } from './components/records/RecordsView';
@@ -13,6 +14,7 @@ import { RecordFormModal } from './components/records/RecordFormModal';
 import { AnalysisView } from './components/analysis/AnalysisView';
 import { AlertsView } from './components/alerts/AlertsView';
 import { ReportsView } from './components/reports/ReportsView';
+import { AboutView } from './components/about/AboutView';
 import { OrganizationView, TeamView } from './components/organization/OrganizationAndTeamView';
 import { SettingsView } from './components/settings/SettingsView';
 import { PublicPages } from './components/public/PublicPages';
@@ -111,6 +113,8 @@ const WattWiseShell: React.FC = () => {
               />
             )}
 
+            {activeSection === 'demos' && <DemosView />}
+
             {activeSection === 'equipment' && (
               <EquipmentView
                 onOpenCreate={openCreateEquipment}
@@ -130,6 +134,8 @@ const WattWiseShell: React.FC = () => {
             {activeSection === 'alerts' && <AlertsView />}
 
             {activeSection === 'reports' && <ReportsView />}
+
+            {activeSection === 'about' && <AboutView />}
 
             {activeSection === 'organization' && <OrganizationView />}
 

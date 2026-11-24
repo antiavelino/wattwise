@@ -21,12 +21,17 @@ interface EquipmentFormModalProps {
   onClose: () => void;
   onSubmit: (data: {
     name: string;
+    manufacturer?: string;
+    model?: string;
     category: EquipmentCategory;
     location?: string;
     powerWatts: number;
     quantity?: number;
     dailyUsageHours?: number;
+    usageFactor?: number;
     status: EquipmentStatus;
+    technicalSource?: string;
+    sourceUrl?: string;
     notes?: string;
   }) => void;
 }
@@ -39,11 +44,16 @@ export const EquipmentFormModal: React.FC<EquipmentFormModalProps> = ({
 }) => {
   const { state } = useWattWise();
   const [name, setName] = useState('');
+  const [manufacturer, setManufacturer] = useState('');
+  const [model, setModel] = useState('');
   const [category, setCategory] = useState<EquipmentCategory>('Climatização');
   const [location, setLocation] = useState('Principal');
   const [powerWattsRaw, setPowerWattsRaw] = useState('');
   const [quantityRaw, setQuantityRaw] = useState('1');
   const [dailyUsageHoursRaw, setDailyUsageHoursRaw] = useState('8');
+  const [usageFactorRaw, setUsageFactorRaw] = useState('1.0');
+  const [technicalSource, setTechnicalSource] = useState('');
+  const [sourceUrl, setSourceUrl] = useState('');
   const [status, setStatus] = useState<EquipmentStatus>('active');
   const [notes, setNotes] = useState('');
   const [errors, setErrors] = useState<EquipmentValidationErrors>({});
@@ -52,20 +62,30 @@ export const EquipmentFormModal: React.FC<EquipmentFormModalProps> = ({
     if (!isOpen) return;
     if (editingEquipment) {
       setName(editingEquipment.name);
+      setManufacturer(editingEquipment.manufacturer ?? '');
+      setModel(editingEquipment.model ?? '');
       setCategory(editingEquipment.category);
       setLocation(editingEquipment.location ?? 'Principal');
       setPowerWattsRaw(String(editingEquipment.powerWatts));
       setQuantityRaw(String(editingEquipment.quantity ?? 1));
       setDailyUsageHoursRaw(String(editingEquipment.dailyUsageHours ?? 8));
+      setUsageFactorRaw(String(editingEquipment.usageFactor ?? 1));
+      setTechnicalSource(editingEquipment.technicalSource ?? '');
+      setSourceUrl(editingEquipment.sourceUrl ?? '');
       setStatus(editingEquipment.status);
       setNotes(editingEquipment.notes ?? '');
     } else {
       setName('');
+      setManufacturer('');
+      setModel('');
       setCategory('Climatização');
       setLocation('Salão Principal');
       setPowerWattsRaw('');
       setQuantityRaw('1');
       setDailyUsageHoursRaw('8');
+      setUsageFactorRaw('1.0');
+      setTechnicalSource('');
+      setSourceUrl('');
       setStatus('active');
       setNotes('');
     }
@@ -76,13 +96,16 @@ export const EquipmentFormModal: React.FC<EquipmentFormModalProps> = ({
     const w = parseNumericInput(powerWattsRaw);
     const q = parseNumericInput(quantityRaw);
     const h = parseNumericInput(dailyUsageHoursRaw);
+    const f = parseNumericInput(usageFactorRaw);
     if (!Number.isFinite(w) || w <= 0) return null;
     const safeQ = Number.isFinite(q) && q >= 1 ? Math.round(q) : 1;
     const safeH = Number.isFinite(h) && h >= 0 ? Math.min(24, h) : 8;
-    const monthlyKwh = calculateEquipmentEnergyKwh(w, safeH, safeQ, 30);
+    const safeF = Number.isFinite(f) && f >= 0.05 && f <= 1 ? f : 1;
+    const dailyKwh = calculateEquipmentEnergyKwh(w, safeH, safeQ, 1, safeF);
+    const monthlyKwh = calculateEquipmentEnergyKwh(w, safeH, safeQ, 30, safeF);
     const monthlyCost = calculateEnergyCostBrl(monthlyKwh, state.settings.tariffPerKwh);
-    return { monthlyKwh, monthlyCost };
-  }, [powerWattsRaw, quantityRaw, dailyUsageHoursRaw, state.settings.tariffPerKwh]);
+    return { dailyKwh, monthlyKwh, monthlyCost };
+  }, [powerWattsRaw, quantityRaw, dailyUsageHoursRaw, usageFactorRaw, state.settings.tariffPerKwh]);
 
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault();
@@ -93,6 +116,7 @@ export const EquipmentFormModal: React.FC<EquipmentFormModalProps> = ({
       powerWattsRaw,
       quantityRaw,
       dailyUsageHoursRaw,
+      usageFactorRaw,
       status,
     });
 
@@ -103,12 +127,17 @@ export const EquipmentFormModal: React.FC<EquipmentFormModalProps> = ({
 
     onSubmit({
       name: name.trim(),
+      manufacturer: manufacturer.trim() || undefined,
+      model: model.trim() || undefined,
       category,
       location: location.trim() || 'Principal',
       powerWatts: validation.parsedPowerWatts,
       quantity: validation.parsedQuantity,
       dailyUsageHours: validation.parsedDailyUsageHours,
+      usageFactor: validation.parsedUsageFactor,
       status,
+      technicalSource: technicalSource.trim() || undefined,
+      sourceUrl: sourceUrl.trim() || undefined,
       notes: notes.trim() || undefined,
     });
     onClose();
@@ -117,15 +146,15 @@ export const EquipmentFormModal: React.FC<EquipmentFormModalProps> = ({
   return (
     <Modal
       isOpen={isOpen}
-      title={editingEquipment ? 'Editar equipamento' : 'Cadastrar equipamento'}
-      subtitle="A potência ativa soma (W × quantidade) e o consumo estimado aplica kWh = (W × horas × qtd) / 1000."
+      title={editingEquipment ? 'Editar equipamento comercial' : 'Cadastrar equipamento comercial'}
+      subtitle="Fórmula: Consumo (kWh) = (Potência W ÷ 1000) × Horas × Quantidade × Fator de Operação."
       onClose={onClose}
-      maxWidth={560}
+      maxWidth={640}
     >
       <form className="form-stack" onSubmit={handleSubmit} noValidate>
         <div className="form-field">
           <label htmlFor="eq-name" className="form-label">
-            Nome do equipamento
+            Nome do equipamento *
           </label>
           <input
             id="eq-name"
@@ -136,11 +165,43 @@ export const EquipmentFormModal: React.FC<EquipmentFormModalProps> = ({
               setName(e.target.value);
               if (errors.name) setErrors((prev) => ({ ...prev, name: undefined }));
             }}
-            placeholder="Ex.: Ar-condicionado Split 18.000 BTU"
+            placeholder="Ex.: Forno Elétrico de Convecção 4 Assadeiras"
             maxLength={80}
             autoFocus
           />
           {errors.name && <span className="form-error">{errors.name}</span>}
+        </div>
+
+        <div className="form-grid-2">
+          <div className="form-field">
+            <label htmlFor="eq-manufacturer" className="form-label">
+              Fabricante / Marca
+            </label>
+            <input
+              id="eq-manufacturer"
+              type="text"
+              className="form-input"
+              value={manufacturer}
+              onChange={(e) => setManufacturer(e.target.value)}
+              placeholder="Ex.: Prática Technipan, Gelopar, LG, Taiff"
+              maxLength={60}
+            />
+          </div>
+
+          <div className="form-field">
+            <label htmlFor="eq-model" className="form-label">
+              Modelo comercial
+            </label>
+            <input
+              id="eq-model"
+              type="text"
+              className="form-input"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              placeholder="Ex.: Miniconv Classic 220V"
+              maxLength={80}
+            />
+          </div>
         </div>
 
         <div className="form-grid-2">
@@ -173,16 +234,16 @@ export const EquipmentFormModal: React.FC<EquipmentFormModalProps> = ({
               className="form-input"
               value={location}
               onChange={(e) => setLocation(e.target.value)}
-              placeholder="Ex.: Cozinha, Salão, Escritório"
+              placeholder="Ex.: Cozinha, Salão, Balcão"
               maxLength={60}
             />
           </div>
         </div>
 
-        <div className="form-grid-3">
+        <div className="form-grid-2">
           <div className="form-field">
             <label htmlFor="eq-power" className="form-label">
-              Potência unitária (Watts)
+              Potência elétrica unitária (Watts) *
             </label>
             <input
               id="eq-power"
@@ -197,14 +258,17 @@ export const EquipmentFormModal: React.FC<EquipmentFormModalProps> = ({
                 setPowerWattsRaw(e.target.value);
                 if (errors.powerWatts) setErrors((prev) => ({ ...prev, powerWatts: undefined }));
               }}
-              placeholder="Ex.: 1800"
+              placeholder="Ex.: 2560 (não usar BTU/h)"
             />
+            <span className="form-hint">
+              Informe a potência elétrica de entrada em Watts (W).
+            </span>
             {errors.powerWatts && <span className="form-error">{errors.powerWatts}</span>}
           </div>
 
           <div className="form-field">
             <label htmlFor="eq-qty" className="form-label">
-              Quantidade
+              Quantidade de unidades *
             </label>
             <input
               id="eq-qty"
@@ -219,10 +283,12 @@ export const EquipmentFormModal: React.FC<EquipmentFormModalProps> = ({
             />
             {errors.quantity && <span className="form-error">{errors.quantity}</span>}
           </div>
+        </div>
 
+        <div className="form-grid-2">
           <div className="form-field">
             <label htmlFor="eq-hours" className="form-label">
-              Uso médio (h/dia)
+              Tempo ligado por dia (0 a 24 h/dia) *
             </label>
             <input
               id="eq-hours"
@@ -237,20 +303,76 @@ export const EquipmentFormModal: React.FC<EquipmentFormModalProps> = ({
             />
             {errors.dailyUsageHours && <span className="form-error">{errors.dailyUsageHours}</span>}
           </div>
+
+          <div className="form-field">
+            <label htmlFor="eq-factor" className="form-label">
+              Fator de operação / ciclo (0,05 a 1,00)
+            </label>
+            <input
+              id="eq-factor"
+              type="number"
+              inputMode="decimal"
+              min={0.05}
+              max={1}
+              step="0.05"
+              className={`form-input tabular-nums ${errors.usageFactor ? 'form-input--error' : ''}`}
+              value={usageFactorRaw}
+              onChange={(e) => setUsageFactorRaw(e.target.value)}
+            />
+            <span className="form-hint">
+              Ex.: 1,00 para iluminação contínua; 0,50 para compressor com termostato.
+            </span>
+            {errors.usageFactor && <span className="form-error">{errors.usageFactor}</span>}
+          </div>
         </div>
 
         {liveEstimate && (
           <div className="inline-preview-box">
-            <span>Consumo mensal estimado (30 dias):</span>
+            <span>
+              Estimativa física: <strong>{formatKwh(liveEstimate.dailyKwh, 2)}/dia</strong> → Em 30
+              dias:
+            </span>
             <strong className="tabular-nums text-emerald">
               {formatKwh(liveEstimate.monthlyKwh)} ({formatCurrencyBRL(liveEstimate.monthlyCost)}/mês)
             </strong>
           </div>
         )}
 
+        <div className="form-grid-2">
+          <div className="form-field">
+            <label htmlFor="eq-source" className="form-label">
+              Fonte técnica da especificação (opcional)
+            </label>
+            <input
+              id="eq-source"
+              type="text"
+              className="form-input"
+              value={technicalSource}
+              onChange={(e) => setTechnicalSource(e.target.value)}
+              placeholder="Ex.: Ficha Técnica Oficial do Fabricante"
+              maxLength={140}
+            />
+          </div>
+
+          <div className="form-field">
+            <label htmlFor="eq-url" className="form-label">
+              URL da fonte consultada (opcional)
+            </label>
+            <input
+              id="eq-url"
+              type="url"
+              className="form-input"
+              value={sourceUrl}
+              onChange={(e) => setSourceUrl(e.target.value)}
+              placeholder="https://..."
+              maxLength={200}
+            />
+          </div>
+        </div>
+
         <div className="form-field">
           <label htmlFor="eq-notes" className="form-label">
-            Observações técnicas (opcional)
+            Observações de operação (opcional)
           </label>
           <input
             id="eq-notes"
@@ -258,8 +380,8 @@ export const EquipmentFormModal: React.FC<EquipmentFormModalProps> = ({
             className="form-input"
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
-            placeholder="Ex.: Revisão preventiva trimestral ou turno de operação"
-            maxLength={140}
+            placeholder="Ex.: Regime de uso ou ciclo termostático"
+            maxLength={160}
           />
         </div>
 

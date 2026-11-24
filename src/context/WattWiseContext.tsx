@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { createDemoDataState } from '../data/demoData';
+import { DEMO_SCENARIOS } from '../data/demoData';
 import { runEnergyAnalysis } from '../engine/analysisEngine';
 import {
   completePasswordReset as authCompleteReset,
@@ -9,12 +9,9 @@ import {
 import { isSupabaseConfigured, supabaseClient } from '../lib/supabase';
 import {
   acknowledgeRemoteAlert,
-  createRemoteOrganization,
   deleteRemoteEquipment,
   deleteRemoteReading,
   fetchRemoteOrganizationData,
-  fetchRemoteUserOrganizations,
-  fetchRemoteUserProfile,
   insertRemoteEquipment,
   insertRemoteReading,
   RemoteOrgBundle,
@@ -23,7 +20,13 @@ import {
   updateRemoteReading,
   updateRemoteSettings,
 } from '../lib/supabaseService';
-import { loadStateFromStorage, saveStateToStorage } from '../storage/localStorage';
+import {
+  loadActiveScenarioIdFromStorage,
+  loadScenarioStateFromStorage,
+  restoreScenarioInStorage,
+  saveActiveScenarioIdToStorage,
+  saveScenarioStateToStorage,
+} from '../storage/localStorage';
 import {
   createEquipmentInOrg,
   createOrganizationForUser,
@@ -42,7 +45,6 @@ import {
   removeMemberFromOrganization,
   resetUserPassword,
   SaasDatabaseSchema,
-  saveSaasDatabase,
   updateAlertStatusInOrg,
   updateEquipmentInOrg,
   updateMemberRoleInOrganization,
@@ -55,6 +57,8 @@ import {
   AppDataState,
   AuditLogEntry,
   ConsumptionRecord,
+  DemoScenarioId,
+  DemoScenarioMeta,
   Equipment,
   EquipmentCategory,
   EquipmentStatus,
@@ -77,12 +81,17 @@ export type WorkspaceMode = 'public' | 'saas' | 'demo';
 
 export interface EquipmentInput {
   name: string;
+  manufacturer?: string;
+  model?: string;
   category: EquipmentCategory;
   location?: string;
   powerWatts: number;
   quantity?: number;
   dailyUsageHours?: number;
+  usageFactor?: number;
   status: EquipmentStatus;
+  technicalSource?: string;
+  sourceUrl?: string;
   notes?: string;
 }
 
@@ -99,9 +108,97 @@ export interface RecordInput {
 
 export interface SettingsInput {
   establishmentName: string;
+  establishmentDescription?: string;
   tariffPerKwh: number;
+  referenceLocation?: string;
+  consumerClass?: string;
+  tariffSource?: string;
+  tariffReferenceDate?: string;
+  tariffTaxNote?: string;
   anomalyThresholdPercent: number;
   timezone?: string;
+}
+
+export const SECTION_TO_PATH: Record<NavSection, string> = {
+  dashboard: '/dashboard',
+  demos: '/demonstracoes',
+  equipment: '/equipamentos',
+  records: '/registros',
+  analysis: '/analises',
+  alerts: '/alertas',
+  reports: '/relatorios',
+  about: '/sobre',
+  settings: '/configuracoes',
+  organization: '/organizacao',
+  team: '/equipe',
+};
+
+export const PUBLIC_PAGE_TO_PATH: Record<PublicPage, string> = {
+  home: '/',
+  features: '/recursos',
+  about: '/sobre',
+  terms: '/termos',
+  privacy: '/privacidade',
+  login: '/dashboard',
+  register: '/dashboard',
+  'forgot-password': '/dashboard',
+  'verify-otp': '/dashboard',
+  'reset-password': '/dashboard',
+  onboarding: '/dashboard',
+};
+
+const SECTION_PAGE_TITLES: Record<NavSection, string> = {
+  dashboard: 'Dashboard — WattWise',
+  demos: 'Cenários de Demonstração — WattWise',
+  equipment: 'Equipamentos e Potências — WattWise',
+  records: 'Registros de Consumo — WattWise',
+  analysis: 'Análises Energéticas — WattWise',
+  alerts: 'Alertas e Recomendações — WattWise',
+  reports: 'Relatórios e Exportação — WattWise',
+  about: 'Sobre o Projeto e Guia Técnico — WattWise',
+  settings: 'Configurações e Tarifas — WattWise',
+  organization: 'Organização — WattWise',
+  team: 'Equipe — WattWise',
+};
+
+export function resolveRouteFromPathname(pathname: string): {
+  mode: WorkspaceMode;
+  publicPage: PublicPage;
+  section: NavSection;
+} {
+  const clean = pathname.replace(/\/+$/, '').toLowerCase() || '/';
+
+  switch (clean) {
+    case '/':
+      return { mode: 'public', publicPage: 'home', section: 'dashboard' };
+    case '/recursos':
+      return { mode: 'public', publicPage: 'features', section: 'dashboard' };
+    case '/termos':
+      return { mode: 'public', publicPage: 'terms', section: 'dashboard' };
+    case '/privacidade':
+      return { mode: 'public', publicPage: 'privacy', section: 'dashboard' };
+    case '/demonstracoes':
+    case '/cenarios':
+      return { mode: 'demo', publicPage: 'home', section: 'demos' };
+    case '/dashboard':
+      return { mode: 'demo', publicPage: 'home', section: 'dashboard' };
+    case '/equipamentos':
+      return { mode: 'demo', publicPage: 'home', section: 'equipment' };
+    case '/registros':
+      return { mode: 'demo', publicPage: 'home', section: 'records' };
+    case '/analises':
+      return { mode: 'demo', publicPage: 'home', section: 'analysis' };
+    case '/alertas':
+      return { mode: 'demo', publicPage: 'home', section: 'alerts' };
+    case '/relatorios':
+      return { mode: 'demo', publicPage: 'home', section: 'reports' };
+    case '/configuracoes':
+      return { mode: 'demo', publicPage: 'home', section: 'settings' };
+    case '/sobre':
+      return { mode: 'demo', publicPage: 'about', section: 'about' };
+    default:
+      return { mode: 'public', publicPage: 'home', section: 'dashboard' };
+  }
 }
 
 interface WattWiseContextValue {
@@ -110,12 +207,24 @@ interface WattWiseContextValue {
   toggleTheme: () => void;
   setTheme: (theme: 'dark' | 'light') => void;
 
-  // Navegação e Modo
+  // Cenários Demonstrativos Isolados
+  activeScenarioId: DemoScenarioId;
+  activeScenarioMeta: DemoScenarioMeta;
+  switchScenario: (scenarioId: DemoScenarioId, navigateToSection?: NavSection) => void;
+  restoreScenarioData: (scenarioId?: DemoScenarioId) => void;
+  getScenarioSummary: (scenarioId: DemoScenarioId) => {
+    meta: DemoScenarioMeta;
+    state: AppDataState;
+    analysis: AnalysisResult;
+  };
+
+  // Navegação e Roteamento Real
+  currentPath: string;
   workspaceMode: WorkspaceMode;
   setWorkspaceMode: (mode: WorkspaceMode) => void;
   publicPage: PublicPage;
   navigatePublic: (page: PublicPage) => void;
-  enterDemoSandbox: () => void;
+  enterDemoSandbox: (scenarioId?: DemoScenarioId | unknown, targetSection?: NavSection) => void;
   activeSection: NavSection;
   setActiveSection: (section: NavSection) => void;
   selectedEquipmentId: string | null;
@@ -152,9 +261,14 @@ interface WattWiseContextValue {
   }) => Promise<void> | void;
   loginAccount: (input: { email: string; password: string }) => Promise<void> | void;
   resetPassword: (input: { email: string; newPassword: string }) => void;
-  requestPasswordResetOtp: (email: string) => Promise<{ ok: boolean; message: string; mockOtp?: string }>;
+  requestPasswordResetOtp: (
+    email: string,
+  ) => Promise<{ ok: boolean; message: string; mockOtp?: string }>;
   verifyPasswordResetOtp: (email: string, otp: string) => Promise<{ ok: boolean; message: string }>;
-  completePasswordReset: (newPassword: string, email?: string) => Promise<{ ok: boolean; message: string }>;
+  completePasswordReset: (
+    newPassword: string,
+    email?: string,
+  ) => Promise<{ ok: boolean; message: string }>;
   logoutAccount: () => Promise<void> | void;
   createOrganization: (input: {
     name: string;
@@ -192,9 +306,6 @@ export const WattWiseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (typeof window !== 'undefined' && window.localStorage) {
         const saved = window.localStorage.getItem('wattwise_theme');
         if (saved === 'light' || saved === 'dark') return saved;
-        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
-          return 'light';
-        }
       }
     } catch {}
     return 'dark';
@@ -213,15 +324,51 @@ export const WattWiseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
   }, []);
 
-  const initialDemoLoad = useMemo(() => loadStateFromStorage(), []);
-  const [demoState, setDemoState] = useState<AppDataState>(initialDemoLoad.state);
+  // Cenários Demonstrativos Isolados (4 cenários independentes no LocalStorage)
+  const [activeScenarioId, setActiveScenarioId] = useState<DemoScenarioId>(() =>
+    loadActiveScenarioIdFromStorage(),
+  );
+
+  const [scenarioStates, setScenarioStates] = useState<Record<DemoScenarioId, AppDataState>>(() => ({
+    cafeteria: loadScenarioStateFromStorage('cafeteria').state,
+    mercado: loadScenarioStateFromStorage('mercado').state,
+    barbearia: loadScenarioStateFromStorage('barbearia').state,
+    padaria: loadScenarioStateFromStorage('padaria').state,
+  }));
+
+  const demoState = scenarioStates[activeScenarioId];
+
+  const updateCurrentScenarioState = useCallback(
+    (updater: (prev: AppDataState) => AppDataState) => {
+      setScenarioStates((prevMap) => {
+        const current = prevMap[activeScenarioId];
+        const next = updater(current);
+        return {
+          ...prevMap,
+          [activeScenarioId]: next,
+        };
+      });
+    },
+    [activeScenarioId],
+  );
+
   const [saasDb, setSaasDb] = useState<SaasDatabaseSchema>(() => loadSaasDatabase());
 
-  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('public');
+  // Inicialização baseada na URL real do navegador
+  const initialRoute = useMemo(() => {
+    if (typeof window !== 'undefined' && window.location) {
+      return resolveRouteFromPathname(window.location.pathname);
+    }
+    return { mode: 'public' as WorkspaceMode, publicPage: 'home' as PublicPage, section: 'dashboard' as NavSection };
+  }, []);
 
-  const [publicPage, setPublicPage] = useState<PublicPage>('home');
+  const [currentPath, setCurrentPath] = useState<string>(() =>
+    typeof window !== 'undefined' ? window.location.pathname : '/',
+  );
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>(initialRoute.mode);
+  const [publicPage, setPublicPage] = useState<PublicPage>(initialRoute.publicPage);
+  const [activeSection, setActiveSectionState] = useState<NavSection>(initialRoute.section);
 
-  const [activeSection, setActiveSection] = useState<NavSection>('dashboard');
   const [selectedEquipmentId, setSelectedEquipmentId] = useState<string | null>(null);
   const [periodFilter, setPeriodFilter] = useState<PeriodFilter>('all');
   const [customDateRange, setCustomDateRange] = useState<{ start: string; end: string }>({
@@ -229,10 +376,49 @@ export const WattWiseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     end: '',
   });
 
-  const [storageError, setStorageError] = useState<string | null>(
-    initialDemoLoad.recoveredFromError ? (initialDemoLoad.errorMessage ?? null) : null,
-  );
+  const [storageError, setStorageError] = useState<string | null>(null);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+
+  // Listener de popstate para botões Voltar / Avançar do navegador
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handlePopState = () => {
+      const route = resolveRouteFromPathname(window.location.pathname);
+      setCurrentPath(window.location.pathname);
+      setWorkspaceMode(route.mode);
+      setPublicPage(route.publicPage);
+      setActiveSectionState(route.section);
+      setSelectedEquipmentId(null);
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  // Atualiza document.title conforme a rota ativa
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    if (workspaceMode === 'public') {
+      document.title = 'WattWise — Transformando dados de consumo em decisões mais inteligentes';
+    } else {
+      const baseTitle = SECTION_PAGE_TITLES[activeSection] ?? 'WattWise';
+      const scenarioLabel = DEMO_SCENARIOS[activeScenarioId]?.shortLabel;
+      document.title = scenarioLabel ? `${baseTitle} (${scenarioLabel})` : baseTitle;
+    }
+  }, [workspaceMode, activeSection, activeScenarioId]);
+
+  const setActiveSection = useCallback((section: NavSection) => {
+    setActiveSectionState(section);
+    setWorkspaceMode('demo');
+    setSelectedEquipmentId(null);
+    const nextPath = SECTION_TO_PATH[section] ?? '/dashboard';
+    setCurrentPath(nextPath);
+    if (typeof window !== 'undefined' && window.location.pathname !== nextPath) {
+      window.history.pushState({ section }, '', nextPath);
+    }
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, []);
 
   const dismissToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((item) => item.id !== id));
@@ -249,87 +435,84 @@ export const WattWiseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     [],
   );
 
+  // Persiste automaticamente o estado do cenário ativo em sua própria chave isolada do LocalStorage
   useEffect(() => {
-    if (workspaceMode === 'demo') {
-      const result = saveStateToStorage(demoState);
-      if (!result.ok) {
-        setStorageError(result.error ?? 'Erro ao salvar dados no LocalStorage.');
-      } else {
-        setStorageError(null);
-      }
+    const result = saveScenarioStateToStorage(activeScenarioId, demoState);
+    if (!result.ok) {
+      setStorageError(result.error ?? 'Erro ao salvar dados no LocalStorage.');
+    } else {
+      setStorageError(null);
     }
-  }, [demoState, workspaceMode]);
+  }, [activeScenarioId, demoState]);
 
-  // Estados para sincronização remota com Supabase Cloud
-  const [remoteUser, setRemoteUser] = useState<UserProfile | null>(null);
-  const [remoteOrgs, setRemoteOrgs] = useState<RemoteUserOrg[]>([]);
+  const switchScenario = useCallback(
+    (scenarioId: DemoScenarioId, navigateToSection?: NavSection) => {
+      if (!DEMO_SCENARIOS[scenarioId]) return;
+      setActiveScenarioId(scenarioId);
+      saveActiveScenarioIdToStorage(scenarioId);
+      setSelectedEquipmentId(null);
+
+      if (navigateToSection) {
+        setActiveSection(navigateToSection);
+      }
+
+      const meta = DEMO_SCENARIOS[scenarioId];
+      pushToast(
+        'info',
+        `Cenário: ${meta.shortLabel}`,
+        `Exibindo dados isolados de "${meta.name}".`,
+      );
+    },
+    [setActiveSection, pushToast],
+  );
+
+  const restoreScenarioData = useCallback(
+    (targetScenarioId?: DemoScenarioId) => {
+      const idToRestore = targetScenarioId ?? activeScenarioId;
+      const fresh = restoreScenarioInStorage(idToRestore);
+      setScenarioStates((prev) => ({
+        ...prev,
+        [idToRestore]: fresh,
+      }));
+      setSelectedEquipmentId(null);
+      const meta = DEMO_SCENARIOS[idToRestore];
+      pushToast(
+        'success',
+        `Cenário ${meta.shortLabel} restaurado`,
+        `Os equipamentos, registros e tarifa originais de "${meta.name}" foram restaurados sem alterar os demais cenários.`,
+      );
+    },
+    [activeScenarioId, pushToast],
+  );
+
+  const getScenarioSummary = useCallback(
+    (scenarioId: DemoScenarioId) => {
+      const meta = DEMO_SCENARIOS[scenarioId];
+      const st = scenarioStates[scenarioId];
+      const an = runEnergyAnalysis(st.equipment, st.records, st.settings, st.alertStates ?? {}, st.records);
+      return { meta, state: st, analysis: an };
+    },
+    [scenarioStates],
+  );
+
+  // Estados para sincronização remota com Supabase Cloud (mantidos para compatibilidade de arquitetura)
+  const [remoteUser] = useState<UserProfile | null>(null);
+  const [remoteOrgs] = useState<RemoteUserOrg[]>([]);
   const [remoteActiveOrgId, setRemoteActiveOrgId] = useState<string | null>(null);
   const [remoteBundle, setRemoteBundle] = useState<RemoteOrgBundle | null>(null);
 
-  const refreshRemoteData = useCallback(async (orgId: string) => {
-    try {
-      const bundle = await fetchRemoteOrganizationData(orgId);
-      setRemoteBundle(bundle);
-    } catch (err) {
-      console.error('Erro ao carregar dados do Supabase:', err);
-      pushToast('error', 'Falha ao sincronizar dados', (err as Error).message);
-    }
-  }, [pushToast]);
-
-  const syncRemoteSession = useCallback(async (authUser: { id: string; email?: string; user_metadata?: Record<string, any>; created_at?: string }) => {
-    try {
-      const prof = await fetchRemoteUserProfile(authUser.id);
-      const userProfile: UserProfile = prof ?? {
-        id: authUser.id,
-        fullName: authUser.user_metadata?.full_name || authUser.email?.split('@')[0] || 'Usuário WattWise',
-        email: authUser.email || '',
-        avatarUrl: authUser.user_metadata?.avatar_url,
-        createdAt: authUser.created_at || new Date().toISOString(),
-        updatedAt: authUser.created_at || new Date().toISOString(),
-      };
-      setRemoteUser(userProfile);
-      const orgs = await fetchRemoteUserOrganizations(authUser.id);
-      setRemoteOrgs(orgs);
-      if (orgs.length > 0) {
-        const defaultOrgId = orgs[0].organization.id;
-        setRemoteActiveOrgId((prev) => (prev && orgs.some((o) => o.organization.id === prev) ? prev : defaultOrgId));
-        setWorkspaceMode('saas');
-      } else {
-        setPublicPage('onboarding');
-        setWorkspaceMode('public');
+  const refreshRemoteData = useCallback(
+    async (orgId: string) => {
+      try {
+        const bundle = await fetchRemoteOrganizationData(orgId);
+        setRemoteBundle(bundle);
+      } catch (err) {
+        console.error('Erro ao carregar dados do Supabase:', err);
+        pushToast('error', 'Falha ao sincronizar dados', (err as Error).message);
       }
-    } catch (err) {
-      console.error('Erro ao sincronizar sessão remota:', err);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!isSupabaseConfigured || !supabaseClient) return;
-
-    // Carrega sessão inicial existente
-    supabaseClient.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        syncRemoteSession(session.user);
-      }
-    });
-
-    const { data: { subscription } } = supabaseClient.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) {
-        syncRemoteSession(session.user);
-      } else {
-        setRemoteUser(null);
-        setRemoteOrgs([]);
-        setRemoteActiveOrgId(null);
-        setRemoteBundle(null);
-        setWorkspaceMode('public');
-        setPublicPage('home');
-      }
-    });
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, [syncRemoteSession]);
+    },
+    [pushToast],
+  );
 
   useEffect(() => {
     if (isSupabaseConfigured && remoteActiveOrgId && workspaceMode === 'saas') {
@@ -380,7 +563,7 @@ export const WattWiseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (workspaceMode === 'saas') {
       if (isSupabaseConfigured && remoteBundle) {
         return {
-          version: 2,
+          version: 3,
           equipment: remoteBundle.equipment,
           records: remoteBundle.readings,
           settings: remoteBundle.settings,
@@ -389,7 +572,7 @@ export const WattWiseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
       if (!isSupabaseConfigured && orgBundle) {
         return {
-          version: 2,
+          version: 3,
           equipment: orgBundle.equipment,
           records: orgBundle.readings,
           settings: orgBundle.settings,
@@ -422,8 +605,16 @@ export const WattWiseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         filteredRecords,
         activeState.settings,
         activeState.alertStates ?? {},
+        periodFilter === 'custom' ? filteredRecords : activeState.records,
       ),
-    [activeState.equipment, filteredRecords, activeState.settings, activeState.alertStates],
+    [
+      activeState.equipment,
+      filteredRecords,
+      activeState.settings,
+      activeState.alertStates,
+      activeState.records,
+      periodFilter,
+    ],
   );
 
   const legacyMigrationPreview = useMemo<LegacyMigrationPreview>(() => {
@@ -438,7 +629,7 @@ export const WattWiseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         demoEquipmentCount: 0,
         demoRecordsCount: 0,
         establishmentName: '',
-        tariffPerKwh: 0.92,
+        tariffPerKwh: 0.79,
         anomalyThresholdPercent: 20,
         sampleEquipment: [],
         sampleRecords: [],
@@ -447,32 +638,52 @@ export const WattWiseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return getLegacyMigrationPreview(saasDb, activeOrganizationId);
   }, [saasDb, activeOrganizationId]);
 
-  const navigatePublic = useCallback((page: PublicPage) => {
-    const authPages = ['login', 'register', 'forgot-password', 'verify-otp', 'reset-password', 'onboarding'];
-    if (authPages.includes(page)) {
-      setWorkspaceMode('demo');
-      setActiveSection('dashboard');
-      setSelectedEquipmentId(null);
-      return;
-    }
-    setPublicPage(page);
-    setWorkspaceMode('public');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }, []);
+  const navigatePublic = useCallback(
+    (page: PublicPage) => {
+      const authPages = [
+        'login',
+        'register',
+        'forgot-password',
+        'verify-otp',
+        'reset-password',
+        'onboarding',
+      ];
+      if (authPages.includes(page)) {
+        setActiveSection('dashboard');
+        return;
+      }
+      if (page === 'about') {
+        setActiveSection('about');
+        return;
+      }
+      setPublicPage(page);
+      setWorkspaceMode('public');
+      const nextPath = PUBLIC_PAGE_TO_PATH[page] ?? '/';
+      setCurrentPath(nextPath);
+      if (typeof window !== 'undefined' && window.location.pathname !== nextPath) {
+        window.history.pushState({ publicPage: page }, '', nextPath);
+      }
+      if (typeof window !== 'undefined') {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    },
+    [setActiveSection],
+  );
 
-  const enterDemoSandbox = useCallback(() => {
-    setWorkspaceMode('demo');
-    setActiveSection('dashboard');
-    setSelectedEquipmentId(null);
-    pushToast(
-      'info',
-      'Modo Demonstração ativo',
-      'Explore livremente o cenário simulado (sem necessidade de login ou conexão remota).',
-    );
-  }, [pushToast]);
+  const enterDemoSandbox = useCallback(
+    (scenarioId?: DemoScenarioId | unknown, targetSection: NavSection = 'dashboard') => {
+      if (typeof scenarioId === 'string' && scenarioId in DEMO_SCENARIOS) {
+        const validId = scenarioId as DemoScenarioId;
+        setActiveScenarioId(validId);
+        saveActiveScenarioIdToStorage(validId);
+      }
+      setActiveSection(targetSection);
+    },
+    [setActiveSection],
+  );
 
   // ==========================================================================
-  // Autenticação & Organizações
+  // Autenticação & Organizações (mantidos apenas por compatibilidade interna)
   // ==========================================================================
 
   const registerAccount = useCallback(
@@ -482,208 +693,50 @@ export const WattWiseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       password: string;
       organizationName?: string;
     }) => {
-      if (isSupabaseConfigured && supabaseClient) {
-        const { data, error } = await supabaseClient.auth.signUp({
-          email: input.email.trim().toLowerCase(),
-          password: input.password,
-          options: {
-            data: {
-              full_name: input.fullName.trim(),
-            },
-          },
-        });
-        if (error) {
-          pushToast('error', 'Falha no cadastro', error.message);
-          throw error;
-        }
-        if (!data.session) {
-          pushToast(
-            'info',
-            'Confirmação enviada',
-            'Verifique sua caixa de entrada para confirmar seu e-mail antes de acessar.',
-          );
-          setPublicPage('login');
-          return;
-        }
-        if (input.organizationName) {
-          try {
-            const newOrgId = await createRemoteOrganization(input.organizationName);
-            setRemoteActiveOrgId(newOrgId);
-          } catch (orgErr) {
-            console.warn('Erro ao criar organização inicial:', orgErr);
-          }
-        }
-        if (data.user) {
-          await syncRemoteSession(data.user);
-        }
-        setWorkspaceMode('saas');
-        setActiveSection('dashboard');
-        pushToast('success', 'Conta criada no Supabase Cloud', `Bem-vindo ao WattWise, ${input.fullName}!`);
-        return;
-      }
-
-      try {
-        const result = registerUserAccount(saasDb, { ...input });
-        setSaasDb({ ...result.db });
-        if (result.organization) {
-          setWorkspaceMode('saas');
-          setActiveSection('dashboard');
-          pushToast(
-            'success',
-            'Conta e organização criadas',
-            `Bem-vindo ao WattWise, ${result.user.fullName}!`,
-          );
-        } else {
-          const joinedOrgs = getOrganizationsForUser(result.db, result.user.id);
-          if (joinedOrgs.length > 0) {
-            setWorkspaceMode('saas');
-            setActiveSection('dashboard');
-            pushToast('success', 'Conta criada', `Você ingressou em ${joinedOrgs[0].organization.name}.`);
-          } else {
-            setPublicPage('onboarding');
-            setWorkspaceMode('public');
-            pushToast('success', 'Conta criada com sucesso', 'Configure sua primeira organização para continuar.');
-          }
-        }
-      } catch (err) {
-        pushToast('error', 'Não foi possível criar a conta', (err as Error).message);
-        throw err;
-      }
+      const result = registerUserAccount(saasDb, { ...input });
+      setSaasDb({ ...result.db });
+      setActiveSection('dashboard');
     },
-    [saasDb, syncRemoteSession, pushToast],
+    [saasDb, setActiveSection],
   );
 
   const loginAccount = useCallback(
     async (input: { email: string; password: string }) => {
-      if (isSupabaseConfigured && supabaseClient) {
-        const { data, error } = await supabaseClient.auth.signInWithPassword({
-          email: input.email.trim().toLowerCase(),
-          password: input.password,
-        });
-        if (error) {
-          pushToast('error', 'Falha na autenticação', error.message);
-          throw error;
-        }
-        if (data.user) {
-          await syncRemoteSession(data.user);
-        }
-        pushToast('success', 'Sessão iniciada via Supabase Cloud', 'Bem-vindo de volta!');
-        return;
-      }
-
-      try {
-        const result = loginUserAccount(saasDb, input);
-        setSaasDb({ ...result.db });
-        const orgs = getOrganizationsForUser(result.db, result.user.id);
-        if (orgs.length === 0) {
-          setPublicPage('onboarding');
-          setWorkspaceMode('public');
-        } else {
-          setWorkspaceMode('saas');
-          setActiveSection('dashboard');
-        }
-        pushToast('success', 'Sessão iniciada', `Bem-vindo de volta, ${result.user.fullName}.`);
-      } catch (err) {
-        pushToast('error', 'Falha na autenticação', (err as Error).message);
-        throw err;
-      }
+      const result = loginUserAccount(saasDb, input);
+      setSaasDb({ ...result.db });
+      setActiveSection('dashboard');
     },
-    [saasDb, syncRemoteSession, pushToast],
+    [saasDb, setActiveSection],
   );
 
   const resetPassword = useCallback(
     (input: { email: string; newPassword: string }) => {
-      try {
-        const nextDb = resetUserPassword(saasDb, input);
-        setSaasDb({ ...nextDb });
-        setPublicPage('login');
-        pushToast('success', 'Senha redefinida', 'Você já pode entrar com sua nova senha.');
-      } catch (err) {
-        pushToast('error', 'Erro ao redefinir senha', (err as Error).message);
-        throw err;
-      }
+      const nextDb = resetUserPassword(saasDb, input);
+      setSaasDb({ ...nextDb });
     },
-    [saasDb, pushToast],
+    [saasDb],
   );
 
-  const requestPasswordResetOtp = useCallback(
-    async (email: string) => {
-      try {
-        const result = await authRequestOtp(email);
-        setSaasDb(loadSaasDatabase());
-        if (result.mockOtp) {
-          pushToast(
-            'info',
-            'Código OTP gerado (Ambiente Local)',
-            `Código para testes: ${result.mockOtp} (válido por 15 min).`,
-          );
-        } else {
-          pushToast(
-            'success',
-            'Código enviado',
-            'Verifique sua caixa de entrada para obter o código de 6 dígitos.',
-          );
-        }
-        return result;
-      } catch (err) {
-        pushToast('error', 'Falha ao solicitar código', (err as Error).message);
-        throw err;
-      }
-    },
-    [pushToast],
-  );
+  const requestPasswordResetOtp = useCallback(async (email: string) => {
+    return authRequestOtp(email);
+  }, []);
 
-  const verifyPasswordResetOtp = useCallback(
-    async (email: string, otp: string) => {
-      try {
-        const result = await authVerifyOtp(email, otp);
-        setSaasDb(loadSaasDatabase());
-        pushToast('success', 'Código validado', 'Insira sua nova senha para concluir a recuperação.');
-        return result;
-      } catch (err) {
-        pushToast('error', 'Código inválido', (err as Error).message);
-        throw err;
-      }
-    },
-    [pushToast],
-  );
+  const verifyPasswordResetOtp = useCallback(async (email: string, otp: string) => {
+    return authVerifyOtp(email, otp);
+  }, []);
 
-  const completePasswordReset = useCallback(
-    async (newPassword: string, email?: string) => {
-      try {
-        const result = await authCompleteReset(newPassword, email);
-        setSaasDb(loadSaasDatabase());
-        setPublicPage('login');
-        pushToast('success', 'Senha redefinida com sucesso', 'Você já pode entrar com sua nova senha.');
-        return result;
-      } catch (err) {
-        pushToast('error', 'Erro ao atualizar senha', (err as Error).message);
-        throw err;
-      }
-    },
-    [pushToast],
-  );
+  const completePasswordReset = useCallback(async (newPassword: string, email?: string) => {
+    return authCompleteReset(newPassword, email);
+  }, []);
 
   const logoutAccount = useCallback(async () => {
     if (isSupabaseConfigured && supabaseClient) {
       await supabaseClient.auth.signOut();
-      setRemoteUser(null);
-      setRemoteOrgs([]);
-      setRemoteActiveOrgId(null);
-      setRemoteBundle(null);
-      setWorkspaceMode('public');
-      setPublicPage('home');
-      setSelectedEquipmentId(null);
-      pushToast('info', 'Sessão encerrada', 'Você saiu da sua conta com segurança.');
-      return;
     }
     const nextDb = logoutUserAccount(saasDb);
     setSaasDb({ ...nextDb });
-    setWorkspaceMode('public');
-    setPublicPage('home');
-    setSelectedEquipmentId(null);
-    pushToast('info', 'Sessão encerrada', 'Você saiu da sua conta com segurança.');
-  }, [saasDb, pushToast]);
+    navigatePublic('home');
+  }, [saasDb, navigatePublic]);
 
   const createOrganization = useCallback(
     async (input: {
@@ -692,196 +745,124 @@ export const WattWiseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       tariffPerKwh?: number;
       anomalyThresholdPercent?: number;
     }) => {
-      if (!currentUser) {
-        pushToast('error', 'Sessão inválida', 'Faça login para criar uma organização.');
-        return;
-      }
-
-      if (isSupabaseConfigured) {
-        try {
-          const newOrgId = await createRemoteOrganization(input.name, undefined, input.timezone);
-          const orgs = await fetchRemoteUserOrganizations(currentUser.id);
-          setRemoteOrgs(orgs);
-          setRemoteActiveOrgId(newOrgId);
-          setWorkspaceMode('saas');
-          setActiveSection('dashboard');
-          pushToast(
-            'success',
-            'Organização configurada no Supabase',
-            `Ambiente de "${input.name}" provisionado no PostgreSQL.`,
-          );
-        } catch (err) {
-          pushToast('error', 'Erro ao criar organização', (err as Error).message);
-          throw err;
-        }
-        return;
-      }
-
-      try {
-        const cloned = structuredClone(saasDb);
-        const result = createOrganizationForUser(cloned, currentUser.id, input);
-        setSaasDb({ ...result.db });
-        setWorkspaceMode('saas');
-        setActiveSection('dashboard');
-        pushToast(
-          'success',
-          'Organização configurada',
-          `Ambiente isolado de "${result.organization.name}" pronto para uso.`,
-        );
-      } catch (err) {
-        pushToast('error', 'Erro ao criar organização', (err as Error).message);
-        throw err;
-      }
-    },
-    [currentUser, saasDb, pushToast],
-  );
-
-  const switchOrganization = useCallback(
-    (organizationId: string) => {
-      if (isSupabaseConfigured) {
-        setRemoteActiveOrgId(organizationId);
-        setSelectedEquipmentId(null);
-        return;
-      }
       if (!currentUser) return;
-      const target = userOrganizations.find((o) => o.organization.id === organizationId);
-      if (!target) {
-        pushToast('error', 'Acesso negado', 'Você não pertence a esta organização.');
-        return;
-      }
-      const nextDb: SaasDatabaseSchema = {
-        ...saasDb,
-        activeOrganizationByUser: {
-          ...saasDb.activeOrganizationByUser,
-          [currentUser.id]: organizationId,
-        },
-      };
-      saveSaasDatabase(nextDb);
-      setSaasDb(nextDb);
-      setSelectedEquipmentId(null);
-      pushToast(
-        'info',
-        'Organização alternada',
-        `Ambiente ativo: ${target.organization.name} (${target.role.toUpperCase()}).`,
-      );
+      const cloned = structuredClone(saasDb);
+      const result = createOrganizationForUser(cloned, currentUser.id, input);
+      setSaasDb({ ...result.db });
     },
-    [currentUser, userOrganizations, saasDb, pushToast],
+    [currentUser, saasDb],
   );
+
+  const switchOrganization = useCallback((organizationId: string) => {
+    setRemoteActiveOrgId(organizationId);
+    setSelectedEquipmentId(null);
+  }, []);
 
   // ==========================================================================
-  // Operações CRUD (Supabase Cloud vs Local Multi-Tenant vs Sandbox Demo)
+  // Operações CRUD Isoladas por Cenário
   // ==========================================================================
 
   const addEquipment = useCallback(
     async (input: EquipmentInput) => {
       if (workspaceMode === 'saas' && currentUser && activeOrganizationId) {
         if (isSupabaseConfigured) {
-          try {
-            const inserted = await insertRemoteEquipment(activeOrganizationId, input);
-            setRemoteBundle((prev) =>
-              prev ? { ...prev, equipment: [inserted, ...prev.equipment] } : null,
-            );
-            pushToast(
-              'success',
-              'Equipamento cadastrado no Supabase',
-              `"${inserted.name}" salvo no PostgreSQL remoto.`,
-            );
-          } catch (err) {
-            pushToast('error', 'Falha ao salvar equipamento', (err as Error).message);
-          }
+          const inserted = await insertRemoteEquipment(activeOrganizationId, input);
+          setRemoteBundle((prev) =>
+            prev ? { ...prev, equipment: [inserted, ...prev.equipment] } : null,
+          );
           return;
         }
-
-        try {
-          const cloned = structuredClone(saasDb);
-          const result = createEquipmentInOrg(cloned, currentUser.id, activeOrganizationId, input);
-          setSaasDb({ ...result.db });
-          pushToast(
-            'success',
-            'Equipamento cadastrado',
-            `"${result.equipment.name}" adicionado à organização.`,
-          );
-        } catch (err) {
-          pushToast('error', 'Operação recusada', (err as Error).message);
-        }
+        const cloned = structuredClone(saasDb);
+        const result = createEquipmentInOrg(cloned, currentUser.id, activeOrganizationId, input);
+        setSaasDb({ ...result.db });
         return;
       }
 
       const newEquipment: Equipment = {
-        id: generateId('eq'),
+        id: generateId(`${activeScenarioId}_eq`),
         name: input.name.trim(),
+        manufacturer: input.manufacturer?.trim() || undefined,
+        model: input.model?.trim() || undefined,
         category: input.category,
         location: input.location?.trim() || 'Principal',
         powerWatts: input.powerWatts,
         quantity: input.quantity ?? 1,
         dailyUsageHours: input.dailyUsageHours ?? 8,
+        usageFactor: input.usageFactor ?? 1,
         status: input.status,
+        technicalSource: input.technicalSource?.trim() || undefined,
+        sourceUrl: input.sourceUrl?.trim() || undefined,
         notes: input.notes?.trim() || undefined,
         isDemo: false,
         updatedAt: new Date().toISOString(),
       };
-      setDemoState((prev) => ({
+      updateCurrentScenarioState((prev) => ({
         ...prev,
         equipment: [newEquipment, ...prev.equipment],
       }));
-      pushToast('success', 'Equipamento cadastrado', `"${newEquipment.name}" foi adicionado ao inventário.`);
+      pushToast(
+        'success',
+        'Equipamento cadastrado',
+        `"${newEquipment.name}" foi adicionado ao cenário ${DEMO_SCENARIOS[activeScenarioId].shortLabel}.`,
+      );
     },
-    [workspaceMode, currentUser, activeOrganizationId, saasDb, pushToast],
+    [
+      workspaceMode,
+      currentUser,
+      activeOrganizationId,
+      saasDb,
+      activeScenarioId,
+      updateCurrentScenarioState,
+      pushToast,
+    ],
   );
 
   const updateEquipment = useCallback(
     async (id: string, input: EquipmentInput) => {
       if (workspaceMode === 'saas' && currentUser && activeOrganizationId) {
         if (isSupabaseConfigured) {
-          try {
-            const updated = await updateRemoteEquipment(activeOrganizationId, id, input);
-            setRemoteBundle((prev) =>
-              prev
-                ? {
-                    ...prev,
-                    equipment: prev.equipment.map((e) => (e.id === id ? updated : e)),
-                  }
-                : null,
-            );
-            pushToast('success', 'Equipamento atualizado no Supabase', `"${input.name.trim()}" salvo com sucesso.`);
-          } catch (err) {
-            pushToast('error', 'Falha ao atualizar equipamento', (err as Error).message);
-          }
+          const updated = await updateRemoteEquipment(activeOrganizationId, id, input);
+          setRemoteBundle((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  equipment: prev.equipment.map((e) => (e.id === id ? updated : e)),
+                }
+              : null,
+          );
           return;
         }
-
-        try {
-          const cloned = structuredClone(saasDb);
-          const nextDb = updateEquipmentInOrg(
-            cloned,
-            currentUser.id,
-            activeOrganizationId,
-            id,
-            input,
-          );
-          setSaasDb({ ...nextDb });
-          pushToast('success', 'Equipamento atualizado', `"${input.name.trim()}" salvo com sucesso.`);
-        } catch (err) {
-          pushToast('error', 'Operação recusada', (err as Error).message);
-        }
+        const cloned = structuredClone(saasDb);
+        const nextDb = updateEquipmentInOrg(
+          cloned,
+          currentUser.id,
+          activeOrganizationId,
+          id,
+          input,
+        );
+        setSaasDb({ ...nextDb });
         return;
       }
 
-      setDemoState((prev) => ({
+      updateCurrentScenarioState((prev) => ({
         ...prev,
         equipment: prev.equipment.map((item) =>
           item.id === id
             ? {
                 ...item,
                 name: input.name.trim(),
+                manufacturer: input.manufacturer?.trim() || undefined,
+                model: input.model?.trim() || undefined,
                 category: input.category,
                 location: input.location?.trim() || item.location || 'Principal',
                 powerWatts: input.powerWatts,
                 quantity: input.quantity ?? item.quantity ?? 1,
                 dailyUsageHours: input.dailyUsageHours ?? item.dailyUsageHours ?? 8,
+                usageFactor: input.usageFactor ?? item.usageFactor ?? 1,
                 status: input.status,
+                technicalSource: input.technicalSource?.trim() || undefined,
+                sourceUrl: input.sourceUrl?.trim() || undefined,
                 notes: input.notes?.trim() || undefined,
-                isDemo: false,
                 updatedAt: new Date().toISOString(),
               }
             : item,
@@ -889,7 +870,14 @@ export const WattWiseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }));
       pushToast('success', 'Equipamento atualizado', `"${input.name.trim()}" foi salvo com sucesso.`);
     },
-    [workspaceMode, currentUser, activeOrganizationId, saasDb, pushToast],
+    [
+      workspaceMode,
+      currentUser,
+      activeOrganizationId,
+      saasDb,
+      updateCurrentScenarioState,
+      pushToast,
+    ],
   );
 
   const toggleEquipmentStatus = useCallback(
@@ -900,61 +888,30 @@ export const WattWiseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       if (workspaceMode === 'saas' && currentUser && activeOrganizationId) {
         if (isSupabaseConfigured) {
-          try {
-            const updated = await updateRemoteEquipment(activeOrganizationId, id, {
-              name: target.name,
-              category: target.category,
-              location: target.location,
-              powerWatts: target.powerWatts,
-              quantity: target.quantity,
-              dailyUsageHours: target.dailyUsageHours,
-              status: nextStatus,
-              notes: target.notes,
-            });
-            setRemoteBundle((prev) =>
-              prev
-                ? {
-                    ...prev,
-                    equipment: prev.equipment.map((e) => (e.id === id ? updated : e)),
-                  }
-                : null,
-            );
-            pushToast(
-              'info',
-              nextStatus === 'active' ? 'Equipamento ativado' : 'Equipamento desativado',
-              `"${target.name}" agora está ${nextStatus === 'active' ? 'ativo' : 'inativo'}.`,
-            );
-          } catch (err) {
-            pushToast('error', 'Falha ao alternar status', (err as Error).message);
-          }
+          const updated = await updateRemoteEquipment(activeOrganizationId, id, {
+            ...target,
+            status: nextStatus,
+          });
+          setRemoteBundle((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  equipment: prev.equipment.map((e) => (e.id === id ? updated : e)),
+                }
+              : null,
+          );
           return;
         }
-
-        try {
-          const cloned = structuredClone(saasDb);
-          const nextDb = updateEquipmentInOrg(cloned, currentUser.id, activeOrganizationId, id, {
-            name: target.name,
-            category: target.category,
-            location: target.location,
-            powerWatts: target.powerWatts,
-            quantity: target.quantity,
-            dailyUsageHours: target.dailyUsageHours,
-            status: nextStatus,
-            notes: target.notes,
-          });
-          setSaasDb({ ...nextDb });
-          pushToast(
-            'info',
-            nextStatus === 'active' ? 'Equipamento ativado' : 'Equipamento desativado',
-            `"${target.name}" agora está ${nextStatus === 'active' ? 'ativo' : 'inativo'}.`,
-          );
-        } catch (err) {
-          pushToast('error', 'Operação recusada', (err as Error).message);
-        }
+        const cloned = structuredClone(saasDb);
+        const nextDb = updateEquipmentInOrg(cloned, currentUser.id, activeOrganizationId, id, {
+          ...target,
+          status: nextStatus,
+        });
+        setSaasDb({ ...nextDb });
         return;
       }
 
-      setDemoState((prev) => ({
+      updateCurrentScenarioState((prev) => ({
         ...prev,
         equipment: prev.equipment.map((item) =>
           item.id === id
@@ -968,45 +925,37 @@ export const WattWiseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         `"${target.name}" agora está ${nextStatus === 'active' ? 'ativo' : 'inativo'} na potência instalada.`,
       );
     },
-    [activeState.equipment, workspaceMode, currentUser, activeOrganizationId, saasDb, pushToast],
+    [
+      activeState.equipment,
+      workspaceMode,
+      currentUser,
+      activeOrganizationId,
+      saasDb,
+      updateCurrentScenarioState,
+      pushToast,
+    ],
   );
 
   const deleteEquipment = useCallback(
     async (id: string) => {
       if (workspaceMode === 'saas' && currentUser && activeOrganizationId) {
         if (isSupabaseConfigured) {
-          try {
-            await deleteRemoteEquipment(activeOrganizationId, id);
-            setRemoteBundle((prev) =>
-              prev
-                ? {
-                    ...prev,
-                    equipment: prev.equipment.filter((e) => e.id !== id),
-                  }
-                : null,
-            );
-            if (selectedEquipmentId === id) setSelectedEquipmentId(null);
-            pushToast('info', 'Equipamento excluído no Supabase', 'Item removido do PostgreSQL.');
-          } catch (err) {
-            pushToast('error', 'Falha ao excluir equipamento', (err as Error).message);
-          }
+          await deleteRemoteEquipment(activeOrganizationId, id);
+          setRemoteBundle((prev) =>
+            prev ? { ...prev, equipment: prev.equipment.filter((e) => e.id !== id) } : null,
+          );
+          if (selectedEquipmentId === id) setSelectedEquipmentId(null);
           return;
         }
-
-        try {
-          const cloned = structuredClone(saasDb);
-          const nextDb = deleteEquipmentInOrg(cloned, currentUser.id, activeOrganizationId, id);
-          setSaasDb({ ...nextDb });
-          if (selectedEquipmentId === id) setSelectedEquipmentId(null);
-          pushToast('info', 'Equipamento excluído', 'Item removido do inventário da organização.');
-        } catch (err) {
-          pushToast('error', 'Operação recusada', (err as Error).message);
-        }
+        const cloned = structuredClone(saasDb);
+        const nextDb = deleteEquipmentInOrg(cloned, currentUser.id, activeOrganizationId, id);
+        setSaasDb({ ...nextDb });
+        if (selectedEquipmentId === id) setSelectedEquipmentId(null);
         return;
       }
 
       let deletedName = '';
-      setDemoState((prev) => {
+      updateCurrentScenarioState((prev) => {
         const target = prev.equipment.find((item) => item.id === id);
         if (target) deletedName = target.name;
         return {
@@ -1021,52 +970,43 @@ export const WattWiseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         deletedName ? `"${deletedName}" foi removido do inventário.` : 'Item removido.',
       );
     },
-    [workspaceMode, currentUser, activeOrganizationId, saasDb, selectedEquipmentId, pushToast],
+    [
+      workspaceMode,
+      currentUser,
+      activeOrganizationId,
+      saasDb,
+      selectedEquipmentId,
+      updateCurrentScenarioState,
+      pushToast,
+    ],
   );
 
   const addRecord = useCallback(
     async (input: RecordInput) => {
       if (workspaceMode === 'saas' && currentUser && activeOrganizationId) {
         if (isSupabaseConfigured) {
-          try {
-            const inserted = await insertRemoteReading(activeOrganizationId, input);
-            setRemoteBundle((prev) =>
-              prev
-                ? {
-                    ...prev,
-                    readings: [...prev.readings, inserted].sort((a, b) => a.date.localeCompare(b.date)),
-                  }
-                : null,
-            );
-            pushToast(
-              'success',
-              'Medição registrada no Supabase',
-              `Lançamento de ${inserted.consumptionKwh.toLocaleString('pt-BR')} kWh gravado no PostgreSQL remoto.`,
-            );
-          } catch (err) {
-            pushToast('error', 'Falha ao registrar consumo', (err as Error).message);
-          }
+          const inserted = await insertRemoteReading(activeOrganizationId, input);
+          setRemoteBundle((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  readings: [...prev.readings, inserted].sort((a, b) =>
+                    a.date.localeCompare(b.date),
+                  ),
+                }
+              : null,
+          );
           return;
         }
-
-        try {
-          const cloned = structuredClone(saasDb);
-          const result = createReadingInOrg(cloned, currentUser.id, activeOrganizationId, input);
-          setSaasDb({ ...result.db });
-          pushToast(
-            'success',
-            'Medição registrada',
-            `Lançamento de ${result.reading.consumptionKwh.toLocaleString('pt-BR')} kWh salvo.`,
-          );
-        } catch (err) {
-          pushToast('error', 'Operação recusada', (err as Error).message);
-        }
+        const cloned = structuredClone(saasDb);
+        const result = createReadingInOrg(cloned, currentUser.id, activeOrganizationId, input);
+        setSaasDb({ ...result.db });
         return;
       }
 
       const mType: MeasurementType = input.measurementType ?? 'measured';
       const newRecord: ConsumptionRecord = {
-        id: generateId('rec'),
+        id: generateId(`${activeScenarioId}_rec`),
         date: input.date,
         consumptionKwh: input.consumptionKwh,
         equipmentId: input.equipmentId || undefined,
@@ -1078,54 +1018,51 @@ export const WattWiseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         isDemo: mType === 'simulated',
         updatedAt: new Date().toISOString(),
       };
-      setDemoState((prev) => ({
+      updateCurrentScenarioState((prev) => ({
         ...prev,
         records: [...prev.records, newRecord],
       }));
       pushToast(
         'success',
         'Consumo registrado',
-        `Lançamento de ${input.consumptionKwh.toLocaleString('pt-BR')} kWh salvo.`,
+        `Lançamento de ${input.consumptionKwh.toLocaleString('pt-BR')} kWh salvo em ${DEMO_SCENARIOS[activeScenarioId].shortLabel}.`,
       );
     },
-    [workspaceMode, currentUser, activeOrganizationId, saasDb, pushToast],
+    [
+      workspaceMode,
+      currentUser,
+      activeOrganizationId,
+      saasDb,
+      activeScenarioId,
+      updateCurrentScenarioState,
+      pushToast,
+    ],
   );
 
   const updateRecord = useCallback(
     async (id: string, input: RecordInput) => {
       if (workspaceMode === 'saas' && currentUser && activeOrganizationId) {
         if (isSupabaseConfigured) {
-          try {
-            const updated = await updateRemoteReading(activeOrganizationId, id, input);
-            setRemoteBundle((prev) =>
-              prev
-                ? {
-                    ...prev,
-                    readings: prev.readings
-                      .map((r) => (r.id === id ? updated : r))
-                      .sort((a, b) => a.date.localeCompare(b.date)),
-                  }
-                : null,
-            );
-            pushToast('success', 'Registro atualizado no Supabase', 'Leitura persistida no PostgreSQL remoto.');
-          } catch (err) {
-            pushToast('error', 'Falha ao atualizar leitura', (err as Error).message);
-          }
+          const updated = await updateRemoteReading(activeOrganizationId, id, input);
+          setRemoteBundle((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  readings: prev.readings
+                    .map((r) => (r.id === id ? updated : r))
+                    .sort((a, b) => a.date.localeCompare(b.date)),
+                }
+              : null,
+          );
           return;
         }
-
-        try {
-          const cloned = structuredClone(saasDb);
-          const nextDb = updateReadingInOrg(cloned, currentUser.id, activeOrganizationId, id, input);
-          setSaasDb({ ...nextDb });
-          pushToast('success', 'Registro atualizado', 'Os indicadores foram recalculados.');
-        } catch (err) {
-          pushToast('error', 'Operação recusada', (err as Error).message);
-        }
+        const cloned = structuredClone(saasDb);
+        const nextDb = updateReadingInOrg(cloned, currentUser.id, activeOrganizationId, id, input);
+        setSaasDb({ ...nextDb });
         return;
       }
 
-      setDemoState((prev) => ({
+      updateCurrentScenarioState((prev) => ({
         ...prev,
         records: prev.records.map((item) =>
           item.id === id
@@ -1135,6 +1072,9 @@ export const WattWiseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                 consumptionKwh: input.consumptionKwh,
                 equipmentId: input.equipmentId || undefined,
                 measurementType: input.measurementType ?? item.measurementType ?? 'measured',
+                source: input.source ?? item.source ?? 'manual',
+                meterPreviousKwh: input.meterPreviousKwh,
+                meterCurrentKwh: input.meterCurrentKwh,
                 note: input.note?.trim() ? input.note.trim() : undefined,
                 isDemo: (input.measurementType ?? item.measurementType) === 'simulated',
                 updatedAt: new Date().toISOString(),
@@ -1145,311 +1085,219 @@ export const WattWiseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       pushToast(
         'success',
         'Registro atualizado',
-        'Os indicadores e alertas foram recalculados automaticamente.',
+        'Os indicadores, comparativo mensal e alertas foram recalculados automaticamente.',
       );
     },
-    [workspaceMode, currentUser, activeOrganizationId, saasDb, pushToast],
+    [workspaceMode, currentUser, activeOrganizationId, saasDb, updateCurrentScenarioState, pushToast],
   );
 
   const deleteRecord = useCallback(
     async (id: string) => {
       if (workspaceMode === 'saas' && currentUser && activeOrganizationId) {
         if (isSupabaseConfigured) {
-          try {
-            await deleteRemoteReading(activeOrganizationId, id);
-            setRemoteBundle((prev) =>
-              prev
-                ? {
-                    ...prev,
-                    readings: prev.readings.filter((r) => r.id !== id),
-                  }
-                : null,
-            );
-            pushToast('info', 'Registro excluído no Supabase', 'Leitura removida do PostgreSQL remoto.');
-          } catch (err) {
-            pushToast('error', 'Falha ao excluir leitura', (err as Error).message);
-          }
+          await deleteRemoteReading(activeOrganizationId, id);
+          setRemoteBundle((prev) =>
+            prev ? { ...prev, readings: prev.readings.filter((r) => r.id !== id) } : null,
+          );
           return;
         }
-
-        try {
-          const cloned = structuredClone(saasDb);
-          const nextDb = deleteReadingInOrg(cloned, currentUser.id, activeOrganizationId, id);
-          setSaasDb({ ...nextDb });
-          pushToast('info', 'Registro excluído', 'O histórico da organização foi recalculado.');
-        } catch (err) {
-          pushToast('error', 'Operação recusada', (err as Error).message);
-        }
+        const cloned = structuredClone(saasDb);
+        const nextDb = deleteReadingInOrg(cloned, currentUser.id, activeOrganizationId, id);
+        setSaasDb({ ...nextDb });
         return;
       }
 
-      setDemoState((prev) => ({
+      updateCurrentScenarioState((prev) => ({
         ...prev,
         records: prev.records.filter((item) => item.id !== id),
       }));
-      pushToast('info', 'Registro excluído', 'O histórico e a previsão mensal foram recalculados.');
+      pushToast(
+        'info',
+        'Registro excluído',
+        'O histórico, o comparativo mensal e a previsão foram recalculados.',
+      );
     },
-    [workspaceMode, currentUser, activeOrganizationId, saasDb, pushToast],
+    [workspaceMode, currentUser, activeOrganizationId, saasDb, updateCurrentScenarioState, pushToast],
   );
 
   const updateSettings = useCallback(
     async (input: SettingsInput) => {
       if (workspaceMode === 'saas' && currentUser && activeOrganizationId) {
         if (isSupabaseConfigured) {
-          try {
-            await updateRemoteSettings(activeOrganizationId, input);
-            setRemoteBundle((prev) =>
-              prev
-                ? {
-                    ...prev,
-                    settings: {
-                      ...prev.settings,
-                      establishmentName: input.establishmentName.trim() || prev.settings.establishmentName,
-                      tariffPerKwh: input.tariffPerKwh,
-                      anomalyThresholdPercent: input.anomalyThresholdPercent,
-                      timezone: input.timezone || prev.settings.timezone,
-                    },
-                  }
-                : null,
-            );
-            pushToast('success', 'Configurações salvas no Supabase', 'Parâmetros atualizados no PostgreSQL.');
-          } catch (err) {
-            pushToast('error', 'Falha ao salvar configurações', (err as Error).message);
-          }
+          await updateRemoteSettings(activeOrganizationId, input);
           return;
         }
-
-        try {
-          const cloned = structuredClone(saasDb);
-          const nextDb = updateOrganizationSettingsInOrg(
-            cloned,
-            currentUser.id,
-            activeOrganizationId,
-            input,
-          );
-          setSaasDb({ ...nextDb });
-          pushToast('success', 'Configurações salvas', 'Parâmetros da organização atualizados.');
-        } catch (err) {
-          pushToast('error', 'Operação recusada', (err as Error).message);
-        }
+        const cloned = structuredClone(saasDb);
+        const nextDb = updateOrganizationSettingsInOrg(
+          cloned,
+          currentUser.id,
+          activeOrganizationId,
+          input,
+        );
+        setSaasDb({ ...nextDb });
         return;
       }
 
-      setDemoState((prev) => ({
+      updateCurrentScenarioState((prev) => ({
         ...prev,
         settings: {
           ...prev.settings,
           establishmentName: input.establishmentName.trim(),
+          establishmentDescription:
+            input.establishmentDescription !== undefined
+              ? input.establishmentDescription.trim()
+              : prev.settings.establishmentDescription,
           tariffPerKwh: input.tariffPerKwh,
+          referenceLocation:
+            input.referenceLocation !== undefined
+              ? input.referenceLocation.trim()
+              : prev.settings.referenceLocation,
+          consumerClass:
+            input.consumerClass !== undefined
+              ? input.consumerClass.trim()
+              : prev.settings.consumerClass,
+          tariffSource:
+            input.tariffSource !== undefined
+              ? input.tariffSource.trim()
+              : prev.settings.tariffSource,
+          tariffReferenceDate:
+            input.tariffReferenceDate !== undefined
+              ? input.tariffReferenceDate.trim()
+              : prev.settings.tariffReferenceDate,
+          tariffTaxNote:
+            input.tariffTaxNote !== undefined
+              ? input.tariffTaxNote.trim()
+              : prev.settings.tariffTaxNote,
           anomalyThresholdPercent: input.anomalyThresholdPercent,
           timezone: input.timezone ?? prev.settings.timezone,
-          isDemoProfile: false,
         },
       }));
-      pushToast('success', 'Configurações salvas', 'Custos estimados e regras de alerta atualizados.');
+      pushToast(
+        'success',
+        'Configurações atualizadas',
+        `Tarifa e parâmetros aplicados ao cenário ${DEMO_SCENARIOS[activeScenarioId].shortLabel}.`,
+      );
     },
-    [workspaceMode, currentUser, activeOrganizationId, saasDb, pushToast],
+    [
+      workspaceMode,
+      currentUser,
+      activeOrganizationId,
+      saasDb,
+      activeScenarioId,
+      updateCurrentScenarioState,
+      pushToast,
+    ],
   );
 
   const updateAlertStatus = useCallback(
     async (alertId: string, status: AlertStatus) => {
       if (workspaceMode === 'saas' && currentUser && activeOrganizationId) {
         if (isSupabaseConfigured) {
-          try {
-            await acknowledgeRemoteAlert(activeOrganizationId, alertId, status, currentUser.id);
-            setRemoteBundle((prev) =>
-              prev
-                ? {
-                    ...prev,
-                    alertStates: {
-                      ...prev.alertStates,
-                      [alertId]: {
-                        status,
-                        acknowledgedBy: currentUser.id,
-                        acknowledgedAt: new Date().toISOString(),
-                      },
-                    },
-                  }
-                : null,
-            );
-            pushToast(
-              'success',
-              status === 'acknowledged'
-                ? 'Alerta reconhecido no Supabase'
-                : status === 'resolved'
-                  ? 'Alerta resolvido no Supabase'
-                  : 'Alerta reaberto no Supabase',
-              'Status operacional sincronizado com o PostgreSQL.',
-            );
-          } catch (err) {
-            pushToast('error', 'Falha ao atualizar alerta', (err as Error).message);
-          }
+          await acknowledgeRemoteAlert(activeOrganizationId, alertId, status, currentUser.id);
           return;
         }
-
-        try {
-          const cloned = structuredClone(saasDb);
-          const nextDb = updateAlertStatusInOrg(
-            cloned,
-            currentUser.id,
-            activeOrganizationId,
-            alertId,
-            status,
-          );
-          setSaasDb({ ...nextDb });
-          pushToast(
-            'success',
-            status === 'acknowledged' ? 'Alerta reconhecido' : status === 'resolved' ? 'Alerta resolvido' : 'Alerta reaberto',
-            'O status operacional do alerta foi registrado.',
-          );
-        } catch (err) {
-          pushToast('error', 'Operação recusada', (err as Error).message);
-        }
+        const cloned = structuredClone(saasDb);
+        const nextDb = updateAlertStatusInOrg(
+          cloned,
+          currentUser.id,
+          activeOrganizationId,
+          alertId,
+          status,
+        );
+        setSaasDb({ ...nextDb });
         return;
       }
 
-      setDemoState((prev) => ({
+      updateCurrentScenarioState((prev) => ({
         ...prev,
         alertStates: {
           ...(prev.alertStates ?? {}),
           [alertId]: {
             status,
-            acknowledgedBy: 'Visitante Demo',
+            acknowledgedBy: 'Operador do Cenário',
             acknowledgedAt: new Date().toISOString(),
           },
         },
       }));
       pushToast(
         'success',
-        status === 'acknowledged' ? 'Alerta reconhecido' : status === 'resolved' ? 'Alerta resolvido' : 'Alerta reaberto',
-        'Status atualizado no ambiente demonstrativo.',
+        status === 'acknowledged'
+          ? 'Alerta reconhecido'
+          : status === 'resolved'
+            ? 'Alerta resolvido'
+            : 'Alerta reaberto',
+        'Status operacional atualizado neste cenário.',
       );
     },
-    [workspaceMode, currentUser, activeOrganizationId, saasDb, pushToast],
+    [workspaceMode, currentUser, activeOrganizationId, saasDb, updateCurrentScenarioState, pushToast],
   );
 
   // ==========================================================================
-  // Equipe, Migração e Demonstração
+  // Equipe, Migração e Restauração
   // ==========================================================================
 
   const inviteMember = useCallback(
     (input: { email: string; role: OrgRole }) => {
-      if (workspaceMode !== 'saas' || !currentUser || !activeOrganizationId) {
-        pushToast('info', 'Disponível em conta autenticada', 'Crie uma conta e organização para gerenciar membros.');
-        return;
-      }
-      try {
-        const cloned = structuredClone(saasDb);
-        const result = inviteMemberToOrganization(cloned, currentUser.id, activeOrganizationId, input);
-        setSaasDb({ ...result.db });
-        pushToast(
-          'success',
-          result.addedDirectly ? 'Membro adicionado à equipe' : 'Convite registrado',
-          result.addedDirectly
-            ? `${input.email} foi vinculado diretamente à organização.`
-            : `Convite pendente criado para ${input.email} (vínculo automático ao se cadastrar).`,
-        );
-      } catch (err) {
-        pushToast('error', 'Não foi possível convidar membro', (err as Error).message);
-      }
+      if (workspaceMode !== 'saas' || !currentUser || !activeOrganizationId) return;
+      const cloned = structuredClone(saasDb);
+      const result = inviteMemberToOrganization(cloned, currentUser.id, activeOrganizationId, input);
+      setSaasDb({ ...result.db });
     },
-    [workspaceMode, currentUser, activeOrganizationId, saasDb, pushToast],
+    [workspaceMode, currentUser, activeOrganizationId, saasDb],
   );
 
   const updateMemberRole = useCallback(
     (memberId: string, role: OrgRole) => {
       if (workspaceMode !== 'saas' || !currentUser || !activeOrganizationId) return;
-      try {
-        const cloned = structuredClone(saasDb);
-        const nextDb = updateMemberRoleInOrganization(
-          cloned,
-          currentUser.id,
-          activeOrganizationId,
-          memberId,
-          role,
-        );
-        setSaasDb({ ...nextDb });
-        pushToast('success', 'Permissão atualizada', `Função alterada para ${role.toUpperCase()}.`);
-      } catch (err) {
-        pushToast('error', 'Operação recusada', (err as Error).message);
-      }
+      const cloned = structuredClone(saasDb);
+      const nextDb = updateMemberRoleInOrganization(
+        cloned,
+        currentUser.id,
+        activeOrganizationId,
+        memberId,
+        role,
+      );
+      setSaasDb({ ...nextDb });
     },
-    [workspaceMode, currentUser, activeOrganizationId, saasDb, pushToast],
+    [workspaceMode, currentUser, activeOrganizationId, saasDb],
   );
 
   const removeMember = useCallback(
     (memberId: string) => {
       if (workspaceMode !== 'saas' || !currentUser || !activeOrganizationId) return;
-      try {
-        const cloned = structuredClone(saasDb);
-        const nextDb = removeMemberFromOrganization(
-          cloned,
-          currentUser.id,
-          activeOrganizationId,
-          memberId,
-        );
-        setSaasDb({ ...nextDb });
-        pushToast('info', 'Membro removido', 'O acesso do usuário a esta organização foi revogado.');
-      } catch (err) {
-        pushToast('error', 'Operação recusada', (err as Error).message);
-      }
+      const cloned = structuredClone(saasDb);
+      const nextDb = removeMemberFromOrganization(
+        cloned,
+        currentUser.id,
+        activeOrganizationId,
+        memberId,
+      );
+      setSaasDb({ ...nextDb });
     },
-    [workspaceMode, currentUser, activeOrganizationId, saasDb, pushToast],
+    [workspaceMode, currentUser, activeOrganizationId, saasDb],
   );
 
   const migrateLegacyData = useCallback(
     (options: { includeSimulatedDemoItems: boolean }) => {
       if (workspaceMode !== 'saas' || !currentUser || !activeOrganizationId) return;
-      try {
-        const cloned = structuredClone(saasDb);
-        const result = migrateLegacyLocalStorageToOrganization(
-          cloned,
-          currentUser.id,
-          activeOrganizationId,
-          options,
-        );
-        setSaasDb({ ...result.db });
-        pushToast(
-          'success',
-          'Migração concluída com sucesso',
-          `${result.importedEquipmentCount} equipamento(s) e ${result.importedRecordsCount} registro(s) importados (${result.skippedDuplicateCount} duplicado(s) ignorado(s)).`,
-        );
-      } catch (err) {
-        pushToast('error', 'Falha na migração', (err as Error).message);
-      }
+      const cloned = structuredClone(saasDb);
+      const result = migrateLegacyLocalStorageToOrganization(
+        cloned,
+        currentUser.id,
+        activeOrganizationId,
+        options,
+      );
+      setSaasDb({ ...result.db });
     },
-    [workspaceMode, currentUser, activeOrganizationId, saasDb, pushToast],
+    [workspaceMode, currentUser, activeOrganizationId, saasDb],
   );
 
   const restoreDemoData = useCallback(() => {
-    const freshDemo = createDemoDataState();
-    setDemoState(freshDemo);
-    if (workspaceMode !== 'demo') {
-      setWorkspaceMode('demo');
-    }
-    pushToast(
-      'success',
-      'Ambiente demonstrativo restaurado',
-      '16 dias de histórico, 8 equipamentos e 2 anomalias simuladas foram recarregados.',
-    );
-  }, [workspaceMode, pushToast]);
+    restoreScenarioData(activeScenarioId);
+  }, [restoreScenarioData, activeScenarioId]);
 
   const clearOperationalData = useCallback(() => {
-    if (workspaceMode === 'saas' && currentUser && activeOrganizationId) {
-      try {
-        const cloned = structuredClone(saasDb);
-        cloned.equipment = cloned.equipment.filter((e) => e.organizationId !== activeOrganizationId);
-        cloned.readings = cloned.readings.filter((r) => r.organizationId !== activeOrganizationId);
-        saveSaasDatabase(cloned);
-        setSaasDb(cloned);
-        pushToast('info', 'Dados da organização limpos', 'Equipamentos e medições da organização foram removidos.');
-      } catch (err) {
-        pushToast('error', 'Operação recusada', (err as Error).message);
-      }
-      return;
-    }
-
-    setDemoState((prev) => ({
+    updateCurrentScenarioState((prev) => ({
       ...prev,
       equipment: [],
       records: [],
@@ -1461,15 +1309,23 @@ export const WattWiseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     pushToast(
       'info',
       'Registros e equipamentos limpos',
-      'Você pode cadastrar dados agora ou restaurar o ambiente demonstrativo quando quiser.',
+      `Os dados do cenário ${DEMO_SCENARIOS[activeScenarioId].shortLabel} foram limpos. Os demais cenários permanecem intactos.`,
     );
-  }, [workspaceMode, currentUser, activeOrganizationId, saasDb, pushToast]);
+  }, [updateCurrentScenarioState, activeScenarioId, pushToast]);
+
+  const activeScenarioMeta = DEMO_SCENARIOS[activeScenarioId];
 
   const value = useMemo<WattWiseContextValue>(
     () => ({
       theme,
       toggleTheme,
       setTheme,
+      activeScenarioId,
+      activeScenarioMeta,
+      switchScenario,
+      restoreScenarioData,
+      getScenarioSummary,
+      currentPath,
       workspaceMode,
       setWorkspaceMode,
       publicPage,
@@ -1486,10 +1342,12 @@ export const WattWiseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       currentUser,
       userOrganizations,
       activeOrganization: isSupabaseConfigured
-        ? (userOrganizations.find((o) => o.organization.id === activeOrganizationId)?.organization ?? null)
+        ? (userOrganizations.find((o) => o.organization.id === activeOrganizationId)
+            ?.organization ?? null)
         : (orgBundle?.organization ?? null),
       activeRole: isSupabaseConfigured
-        ? (userOrganizations.find((o) => o.organization.id === activeOrganizationId)?.role ?? 'owner')
+        ? (userOrganizations.find((o) => o.organization.id === activeOrganizationId)?.role ??
+          'owner')
         : (orgBundle?.role ?? 'owner'),
       members: orgBundle?.members ?? [],
       invitations: orgBundle?.invitations ?? [],
@@ -1530,16 +1388,24 @@ export const WattWiseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       theme,
       toggleTheme,
       setTheme,
+      activeScenarioId,
+      activeScenarioMeta,
+      switchScenario,
+      restoreScenarioData,
+      getScenarioSummary,
+      currentPath,
       workspaceMode,
       publicPage,
       navigatePublic,
       enterDemoSandbox,
       activeSection,
+      setActiveSection,
       selectedEquipmentId,
       periodFilter,
       customDateRange,
       currentUser,
       userOrganizations,
+      activeOrganizationId,
       orgBundle,
       legacyMigrationPreview,
       activeState,

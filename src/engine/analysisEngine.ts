@@ -1,4 +1,8 @@
 import {
+  OFFICIAL_EMISSION_REFERENCE,
+  OFFICIAL_TARIFF_REFERENCE,
+} from '../data/demoData';
+import {
   AlertAcknowledgement,
   AnalysisResult,
   AnomalyAlert,
@@ -16,6 +20,7 @@ import {
   MonthlyComparisonPoint,
   PeriodComparisonSummary,
   Recommendation,
+  SystemAlert,
 } from '../types/energy';
 import {
   formatCurrencyBRL,
@@ -24,6 +29,7 @@ import {
   formatPercent,
   formatPower,
   formatShortDate,
+  getTodayIsoDate,
 } from '../utils/formatters';
 
 export const MIN_RECORDS_FOR_FORECAST = 3;
@@ -34,19 +40,25 @@ const FORECAST_WINDOW_DAYS = 30;
 const DAYS_IN_MONTH = 30;
 
 /**
- * Fator médio de emissão de referência da matriz elétrica brasileira (SIN),
- * em kg CO2e por kWh consumido, utilizado para estimar o impacto ambiental.
+ * Fator médio anual oficial de emissão de CO2 da matriz elétrica brasileira (SIN),
+ * publicado pelo MCTI / SIRENE (0,0385 tCO2/MWh = 0,0385 kg CO2/kWh).
  */
-export const BRAZIL_GRID_EMISSION_FACTOR_KG_CO2_PER_KWH = 0.0817;
+export const BRAZIL_GRID_EMISSION_FACTOR_KG_CO2_PER_KWH =
+  OFFICIAL_EMISSION_REFERENCE.emissionFactorKgPerKwh;
 
 /**
- * Estima emissões de CO2 equivalente (kg CO2e) a partir da energia elétrica (kWh).
+ * Estima emissões de CO2 (kg CO2) a partir da energia elétrica (kWh).
  */
 export function calculateCo2EmissionsKg(
   energyKwh: number,
   emissionFactor = BRAZIL_GRID_EMISSION_FACTOR_KG_CO2_PER_KWH,
 ): number {
-  if (!Number.isFinite(energyKwh) || energyKwh <= 0 || !Number.isFinite(emissionFactor) || emissionFactor <= 0) {
+  if (
+    !Number.isFinite(energyKwh) ||
+    energyKwh <= 0 ||
+    !Number.isFinite(emissionFactor) ||
+    emissionFactor <= 0
+  ) {
     return 0;
   }
   return roundTo(energyKwh * emissionFactor, 2);
@@ -59,37 +71,46 @@ function roundTo(value: number, decimals: number): number {
 
 /**
  * Fórmula física de consumo energético:
- * kWh = (Potência em W × horas de utilização × quantidade × dias) / 1000
- * Diferencia potência nominal (W / kW) de energia consumida (kWh).
+ * Consumo (kWh) = (Potência em W ÷ 1000) × Tempo (horas) × Quantidade × Dias × Fator de Operação
+ * Diferencia potência nominal instalada (W / kW) de energia efetivamente consumida (kWh).
  */
 export function calculateEquipmentEnergyKwh(
   powerWatts: number,
   hoursPerDay: number,
   quantity = 1,
   days = 1,
+  usageFactor = 1,
 ): number {
   if (
     !Number.isFinite(powerWatts) ||
     !Number.isFinite(hoursPerDay) ||
     !Number.isFinite(quantity) ||
     !Number.isFinite(days) ||
+    !Number.isFinite(usageFactor) ||
     powerWatts <= 0 ||
     hoursPerDay < 0 ||
     quantity <= 0 ||
-    days <= 0
+    days <= 0 ||
+    usageFactor <= 0
   ) {
     return 0;
   }
   const safeHours = Math.min(24, Math.max(0, hoursPerDay));
-  return roundTo((powerWatts * safeHours * quantity * days) / 1000, 2);
+  const safeFactor = Math.min(1, Math.max(0.05, usageFactor));
+  return roundTo(((powerWatts / 1000) * safeHours * quantity * days * safeFactor), 2);
 }
 
 /**
- * Custo financeiro da energia:
- * Custo (R$) = Energia (kWh) × Tarifa (R$/kWh)
+ * Custo financeiro estimado da energia:
+ * Custo estimado (R$) = Consumo (kWh) × Tarifa (R$/kWh)
  */
 export function calculateEnergyCostBrl(energyKwh: number, tariffPerKwh: number): number {
-  if (!Number.isFinite(energyKwh) || !Number.isFinite(tariffPerKwh) || energyKwh < 0 || tariffPerKwh <= 0) {
+  if (
+    !Number.isFinite(energyKwh) ||
+    !Number.isFinite(tariffPerKwh) ||
+    energyKwh < 0 ||
+    tariffPerKwh <= 0
+  ) {
     return 0;
   }
   return roundTo(energyKwh * tariffPerKwh, 2);
@@ -97,6 +118,7 @@ export function calculateEnergyCostBrl(energyKwh: number, tariffPerKwh: number):
 
 /**
  * Calcula o consumo ocorrido entre duas leituras cumulativas de um medidor (kWh).
+ * Impede somar leituras acumuladas diretamente como se fossem consumo diário.
  */
 export function calculateCumulativeMeterDelta(
   previousReadingKwh: number,
@@ -181,7 +203,7 @@ function countCalendarSpanDays(startDateIso: string, endDateIso: string): number
   return Math.floor(diffMs / (1000 * 60 * 60 * 24)) + 1;
 }
 
-const MONTH_NAMES_PT = [
+const MONTH_NAMES_SHORT_PT = [
   'Jan',
   'Fev',
   'Mar',
@@ -196,61 +218,162 @@ const MONTH_NAMES_PT = [
   'Dez',
 ];
 
-function buildMonthlyComparison(
-  sortedRecords: ConsumptionRecord[],
+const MONTH_NAMES_FULL_PT = [
+  'Janeiro',
+  'Fevereiro',
+  'Março',
+  'Abril',
+  'Maio',
+  'Junho',
+  'Julho',
+  'Agosto',
+  'Setembro',
+  'Outubro',
+  'Novembro',
+  'Dezembro',
+];
+
+export function getCalendarDaysInMonth(year: number, month1To12: number): number {
+  if (!Number.isFinite(year) || !Number.isFinite(month1To12)) return 30;
+  return new Date(year, month1To12, 0).getDate();
+}
+
+/**
+ * Constrói o Comparativo Mensal Consolidado sem falhas de fuso horário,
+ * agrupando estritamente pela competência YYYY-MM da string ISO local,
+ * deduplicando registros idênticos, contando dias únicos registrados no mês,
+ * calculando projeção mensal proporcional e variações percentuais seguras (sem NaN/Infinity).
+ */
+export function buildMonthlyComparison(
+  records: ConsumptionRecord[],
   tariffPerKwh: number,
 ): MonthlyComparisonPoint[] {
+  const sorted = sortRecordsChronologically(records);
   const map = new Map<
     string,
     {
       totalKwh: number;
-      daysCount: number;
+      uniqueDates: Set<string>;
       measuredKwh: number;
       estimatedKwh: number;
       simulatedKwh: number;
     }
   >();
 
-  for (const record of sortedRecords) {
+  const seenRecordIds = new Set<string>();
+
+  for (const record of sorted) {
+    if (!record || typeof record.date !== 'string' || record.date.length < 7) continue;
+    if (!Number.isFinite(record.consumptionKwh) || record.consumptionKwh < 0) continue;
+
+    // Evita duplicação caso o mesmo ID apareça duas vezes
+    if (record.id && seenRecordIds.has(record.id)) continue;
+    if (record.id) seenRecordIds.add(record.id);
+
+    // Extração direta por string ISO (YYYY-MM) imune a deslocamentos de fuso horário UTC
     const monthKey = record.date.slice(0, 7);
+    const [yearPart, monthPart] = monthKey.split('-');
+    const yearNum = Number(yearPart);
+    const monthNum = Number(monthPart);
+    if (!Number.isInteger(yearNum) || !Number.isInteger(monthNum) || monthNum < 1 || monthNum > 12) {
+      continue;
+    }
+
     const mType = resolveMeasurementType(record);
     const current = map.get(monthKey) ?? {
       totalKwh: 0,
-      daysCount: 0,
+      uniqueDates: new Set<string>(),
       measuredKwh: 0,
       estimatedKwh: 0,
       simulatedKwh: 0,
     };
+
     current.totalKwh += record.consumptionKwh;
-    current.daysCount += 1;
+    current.uniqueDates.add(record.date.slice(0, 10));
+
     if (mType === 'measured') current.measuredKwh += record.consumptionKwh;
     else if (mType === 'estimated') current.estimatedKwh += record.consumptionKwh;
     else current.simulatedKwh += record.consumptionKwh;
+
     map.set(monthKey, current);
   }
 
-  return Array.from(map.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([monthKey, item]) => {
-      const [yearStr, monthStr] = monthKey.split('-');
-      const monthIdx = Math.max(0, Math.min(11, Number(monthStr) - 1));
-      const monthLabel = `${MONTH_NAMES_PT[monthIdx]}/${yearStr.slice(2)}`;
-      const totalKwh = roundTo(item.totalKwh, 1);
-      return {
-        monthKey,
-        monthLabel,
-        totalKwh,
-        totalCostBrl: calculateEnergyCostBrl(totalKwh, tariffPerKwh),
-        averageDailyKwh: item.daysCount > 0 ? roundTo(item.totalKwh / item.daysCount, 2) : 0,
-        daysCount: item.daysCount,
-        measuredKwh: roundTo(item.measuredKwh, 1),
-        estimatedKwh: roundTo(item.estimatedKwh, 1),
-        simulatedKwh: roundTo(item.simulatedKwh, 1),
-      };
+  const sortedEntries = Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b));
+  const points: MonthlyComparisonPoint[] = [];
+
+  for (let idx = 0; idx < sortedEntries.length; idx += 1) {
+    const [monthKey, item] = sortedEntries[idx];
+    const [yearStr, monthStr] = monthKey.split('-');
+    const yearNum = Number(yearStr);
+    const monthNum = Number(monthStr);
+    const monthIdx = Math.max(0, Math.min(11, monthNum - 1));
+
+    const monthLabel = `${MONTH_NAMES_SHORT_PT[monthIdx]}/${yearStr.slice(2)}`;
+    const fullMonthName = `${MONTH_NAMES_FULL_PT[monthIdx]} de ${yearStr}`;
+    const calendarDaysInMonth = getCalendarDaysInMonth(yearNum, monthNum);
+    const daysCount = item.uniqueDates.size;
+
+    const totalKwh = roundTo(item.totalKwh, 2);
+    const totalCostBrl = calculateEnergyCostBrl(totalKwh, tariffPerKwh);
+    const rawAvgDaily = daysCount > 0 ? item.totalKwh / daysCount : 0;
+    const averageDailyKwh = roundTo(rawAvgDaily, 2);
+    const averageDailyCostBrl = calculateEnergyCostBrl(averageDailyKwh, tariffPerKwh);
+
+    const isPartialMonth = daysCount < calendarDaysInMonth;
+    const projectedFullMonthKwh = isPartialMonth
+      ? roundTo(rawAvgDaily * calendarDaysInMonth, 1)
+      : roundTo(totalKwh, 1);
+    const projectedFullMonthCostBrl = calculateEnergyCostBrl(projectedFullMonthKwh, tariffPerKwh);
+
+    const prevPoint = idx > 0 ? points[idx - 1] : null;
+    const previousMonthKey = prevPoint ? prevPoint.monthKey : null;
+    const previousMonthLabel = prevPoint ? prevPoint.monthLabel : null;
+    const previousMonthTotalKwh = prevPoint ? prevPoint.totalKwh : null;
+    const previousMonthAverageDailyKwh = prevPoint ? prevPoint.averageDailyKwh : null;
+
+    // Variação percentual segura: se o período anterior for zero ou inexistente, retorna null (nunca NaN ou Infinity)
+    const totalVariationPercent =
+      prevPoint && prevPoint.totalKwh > 0
+        ? roundTo(((totalKwh - prevPoint.totalKwh) / prevPoint.totalKwh) * 100, 1)
+        : null;
+
+    const dailyAvgVariationPercent =
+      prevPoint && prevPoint.averageDailyKwh > 0
+        ? roundTo(
+            ((averageDailyKwh - prevPoint.averageDailyKwh) / prevPoint.averageDailyKwh) * 100,
+            1,
+          )
+        : null;
+
+    points.push({
+      monthKey,
+      monthLabel,
+      fullMonthName,
+      totalKwh: roundTo(totalKwh, 1),
+      totalCostBrl,
+      averageDailyKwh,
+      averageDailyCostBrl,
+      daysCount,
+      calendarDaysInMonth,
+      projectedFullMonthKwh,
+      projectedFullMonthCostBrl,
+      measuredKwh: roundTo(item.measuredKwh, 1),
+      estimatedKwh: roundTo(item.estimatedKwh, 1),
+      simulatedKwh: roundTo(item.simulatedKwh, 1),
+      previousMonthKey,
+      previousMonthLabel,
+      previousMonthTotalKwh,
+      previousMonthAverageDailyKwh,
+      totalVariationPercent,
+      dailyAvgVariationPercent,
+      isPartialMonth,
     });
+  }
+
+  return points;
 }
 
-function buildPeriodComparison(
+export function buildPeriodComparison(
   sortedRecords: ConsumptionRecord[],
   tariffPerKwh: number,
 ): PeriodComparisonSummary {
@@ -259,17 +382,25 @@ function buildPeriodComparison(
       sortedRecords.reduce((acc, r) => acc + r.consumptionKwh, 0),
       1,
     );
+    const avg = sortedRecords.length > 0 ? roundTo(total / sortedRecords.length, 2) : 0;
     return {
       currentPeriodKwh: total,
       previousPeriodKwh: 0,
       variationPercent: null,
       currentPeriodCostBrl: calculateEnergyCostBrl(total, tariffPerKwh),
       previousPeriodCostBrl: 0,
+      currentPeriodAvgDailyKwh: avg,
+      previousPeriodAvgDailyKwh: 0,
+      currentDaysCount: sortedRecords.length,
+      previousDaysCount: 0,
     };
   }
 
   const half = Math.floor(sortedRecords.length / 2);
-  const previousSlice = sortedRecords.slice(sortedRecords.length - half * 2, sortedRecords.length - half);
+  const previousSlice = sortedRecords.slice(
+    sortedRecords.length - half * 2,
+    sortedRecords.length - half,
+  );
   const currentSlice = sortedRecords.slice(sortedRecords.length - half);
 
   const previousPeriodKwh = roundTo(
@@ -291,6 +422,10 @@ function buildPeriodComparison(
     variationPercent,
     currentPeriodCostBrl: calculateEnergyCostBrl(currentPeriodKwh, tariffPerKwh),
     previousPeriodCostBrl: calculateEnergyCostBrl(previousPeriodKwh, tariffPerKwh),
+    currentPeriodAvgDailyKwh: half > 0 ? roundTo(currentPeriodKwh / half, 2) : 0,
+    previousPeriodAvgDailyKwh: half > 0 ? roundTo(previousPeriodKwh / half, 2) : 0,
+    currentDaysCount: currentSlice.length,
+    previousDaysCount: previousSlice.length,
   };
 }
 
@@ -303,6 +438,7 @@ export function runEnergyAnalysis(
   records: ConsumptionRecord[],
   settings: AppSettings,
   alertStates: Record<string, AlertAcknowledgement> = {},
+  allScenarioRecords?: ConsumptionRecord[],
 ): AnalysisResult {
   const sortedRecords = sortRecordsChronologically(records);
   const totalRecords = sortedRecords.length;
@@ -352,9 +488,7 @@ export function runEnergyAnalysis(
   const forecastWindow = sortedRecords.slice(-FORECAST_WINDOW_DAYS);
   const forecastBasisDays = forecastWindow.length;
   const forecastValues = forecastWindow.map((r) => r.consumptionKwh);
-  const rawForecastBasisAverage = hasEnoughDataForForecast
-    ? calculateMean(forecastValues)
-    : null;
+  const rawForecastBasisAverage = hasEnoughDataForForecast ? calculateMean(forecastValues) : null;
   const forecastBasisAverageKwh =
     rawForecastBasisAverage !== null ? roundTo(rawForecastBasisAverage, 2) : null;
 
@@ -422,8 +556,8 @@ export function runEnergyAnalysis(
     limitations: !hasEnoughDataForForecast
       ? `Base insuficiente: faltam ${recordsNeededForForecast} dia(s) de medição.`
       : missingDaysInWindow > 0
-        ? `Estimativa sujeita a variação: há ${missingDaysInWindow} dia(s) sem leitura no intervalo analisado e coeficiente de variação diária de ${variationCoefficientPercent ?? 0}%. Não representa valor garantido de fatura.`
-        : `Estimativa estatística com coeficiente de variação diária de ${variationCoefficientPercent ?? 0}%. Mudanças de turno, clima ou bandeira tarifária alteram o consumo real.`,
+        ? `Estimativa sujeita a variação: há ${missingDaysInWindow} dia(s) sem leitura no intervalo analisado e coeficiente de variação diária de ${variationCoefficientPercent ?? 0}%. Não representa valor exato de fatura.`
+        : `Estimativa estatística com coeficiente de variação diária de ${variationCoefficientPercent ?? 0}%. Mudanças de turno, clima, tributos ou bandeira tarifária alteram o valor final da fatura.`,
   };
 
   // Potência nominal instalada × Consumo estimado de equipamentos
@@ -442,7 +576,7 @@ export function runEnergyAnalysis(
     0,
   );
 
-  // Resumo individual por equipamento (diferenciando potência nominal, consumo calculado e consumo medido vinculado)
+  // Resumo individual por equipamento (diferenciando potência nominal, consumo calculado com fator de ciclo e consumo medido vinculado)
   const measuredByEquipmentId = new Map<string, { kwh: number; count: number }>();
   for (const r of sortedRecords) {
     if (!r.equipmentId) continue;
@@ -456,14 +590,26 @@ export function runEnergyAnalysis(
   const rawEquipmentSummaries = equipment.map((eq) => {
     const qty = Math.max(1, eq.quantity ?? 1);
     const hours = eq.dailyUsageHours ?? 8;
+    const effectiveUsageFactor =
+      typeof eq.usageFactor === 'number' && eq.usageFactor > 0 && eq.usageFactor <= 1
+        ? eq.usageFactor
+        : 1;
     const totalRatedPowerWatts = eq.powerWatts * qty;
     const isAct = eq.status === 'active';
+
     const estimatedDailyKwh = isAct
-      ? calculateEquipmentEnergyKwh(eq.powerWatts, hours, qty, 1)
+      ? calculateEquipmentEnergyKwh(eq.powerWatts, hours, qty, 1, effectiveUsageFactor)
       : 0;
     const estimatedMonthlyKwh = isAct
-      ? calculateEquipmentEnergyKwh(eq.powerWatts, hours, qty, DAYS_IN_MONTH)
+      ? calculateEquipmentEnergyKwh(eq.powerWatts, hours, qty, DAYS_IN_MONTH, effectiveUsageFactor)
       : 0;
+    const nominalDailyKwhWithoutFactor = isAct
+      ? calculateEquipmentEnergyKwh(eq.powerWatts, hours, qty, 1, 1)
+      : 0;
+    const nominalMonthlyKwhWithoutFactor = isAct
+      ? calculateEquipmentEnergyKwh(eq.powerWatts, hours, qty, DAYS_IN_MONTH, 1)
+      : 0;
+
     const estimatedMonthlyCostBrl = calculateEnergyCostBrl(
       estimatedMonthlyKwh,
       settings.tariffPerKwh,
@@ -473,14 +619,21 @@ export function runEnergyAnalysis(
     return {
       equipment: eq,
       totalRatedPowerWatts,
+      effectiveUsageFactor,
       estimatedDailyKwh,
       estimatedMonthlyKwh,
       estimatedMonthlyCostBrl,
+      nominalDailyKwhWithoutFactor,
+      nominalMonthlyKwhWithoutFactor,
       measuredPeriodKwh: roundTo(measuredStats.kwh, 2),
       measuredReadingsCount: measuredStats.count,
     };
   });
 
+  const estimatedEquipmentDailyKwh = roundTo(
+    rawEquipmentSummaries.reduce((acc, item) => acc + item.estimatedDailyKwh, 0),
+    2,
+  );
   const estimatedEquipmentMonthlyKwh = roundTo(
     rawEquipmentSummaries.reduce((acc, item) => acc + item.estimatedMonthlyKwh, 0),
     1,
@@ -502,23 +655,25 @@ export function runEnergyAnalysis(
           ? roundTo((item.estimatedMonthlyKwh / estimatedEquipmentMonthlyKwh) * 100, 1)
           : 0,
     }))
-    .sort((a, b) => b.totalRatedPowerWatts - a.totalRatedPowerWatts);
+    .sort((a, b) => b.estimatedMonthlyKwh - a.estimatedMonthlyKwh || b.totalRatedPowerWatts - a.totalRatedPowerWatts);
 
   // Distribuição de potência ativa e consumo estimado por categoria
   const categoryMap = new Map<
     EquipmentCategory,
-    { powerWatts: number; estimatedMonthlyKwh: number; activeCount: number }
+    { powerWatts: number; estimatedDailyKwh: number; estimatedMonthlyKwh: number; activeCount: number }
   >();
   for (const summary of equipmentSummaries) {
     if (summary.equipment.status !== 'active') continue;
     const cat = summary.equipment.category;
     const existing = categoryMap.get(cat) ?? {
       powerWatts: 0,
+      estimatedDailyKwh: 0,
       estimatedMonthlyKwh: 0,
       activeCount: 0,
     };
     categoryMap.set(cat, {
       powerWatts: existing.powerWatts + summary.totalRatedPowerWatts,
+      estimatedDailyKwh: existing.estimatedDailyKwh + summary.estimatedDailyKwh,
       estimatedMonthlyKwh: existing.estimatedMonthlyKwh + summary.estimatedMonthlyKwh,
       activeCount: existing.activeCount + 1,
     });
@@ -530,6 +685,7 @@ export function runEnergyAnalysis(
       return {
         category,
         powerWatts: data.powerWatts,
+        estimatedDailyKwh: roundTo(data.estimatedDailyKwh, 2),
         estimatedMonthlyKwh: estKwh,
         estimatedMonthlyCostBrl: calculateEnergyCostBrl(estKwh, settings.tariffPerKwh),
         activeCount: data.activeCount,
@@ -537,9 +693,13 @@ export function runEnergyAnalysis(
           activeInstalledPowerWatts > 0
             ? roundTo((data.powerWatts / activeInstalledPowerWatts) * 100, 1)
             : 0,
+        energyPercentage:
+          estimatedEquipmentMonthlyKwh > 0
+            ? roundTo((estKwh / estimatedEquipmentMonthlyKwh) * 100, 1)
+            : 0,
       };
     })
-    .sort((a, b) => b.powerWatts - a.powerWatts);
+    .sort((a, b) => b.estimatedMonthlyKwh - a.estimatedMonthlyKwh || b.powerWatts - a.powerWatts);
 
   const topActiveEquipment = [...activeEquipment]
     .sort((a, b) => getEquipmentTotalWatts(b) - getEquipmentTotalWatts(a))
@@ -551,6 +711,7 @@ export function runEnergyAnalysis(
 
   const anomalies: AnomalyAlert[] = [];
   const chartData: ChartPoint[] = [];
+  const eqNameById = new Map(equipment.map((e) => [e.id, e.name]));
 
   for (let i = 0; i < sortedRecords.length; i += 1) {
     const record = sortedRecords[i];
@@ -580,6 +741,7 @@ export function runEnergyAnalysis(
 
           const alertId = `anomaly_${record.id}`;
           const savedAck = alertStates[alertId];
+          const linkedEqName = record.equipmentId ? eqNameById.get(record.equipmentId) : undefined;
 
           anomalies.push({
             id: alertId,
@@ -599,12 +761,18 @@ export function runEnergyAnalysis(
             acknowledgedBy: savedAck?.acknowledgedBy,
             acknowledgedAt: savedAck?.acknowledgedAt,
             isDemo: record.isDemo,
+            alertCategory: 'anomaly',
             title:
               anomalySeverity === 'critical'
-                ? `Pico crítico em ${formatFullDate(record.date)}`
-                : `Consumo acima do limite em ${formatFullDate(record.date)}`,
-            description: `${formatKwh(record.consumptionKwh)} registrados, ${formatPercent(deviationPercent, true)} acima da média dos ${priorSlice.length} dias anteriores (${formatKwh(baselineAverageKwh)}). Excedente estimado de ${formatCurrencyBRL(estimatedExcessCostBrl)}.`,
-            explanation: `Regra estatística local: o consumo em ${formatFullDate(record.date)} (${formatKwh(record.consumptionKwh)}) superou em ${formatPercent(deviationPercent)} a janela histórica anterior de ${priorSlice.length} dias (${formatKwh(baselineAverageKwh)}), ultrapassando o limite configurado de ${formatPercent(settings.anomalyThresholdPercent)}.`,
+                ? `Pico crítico de consumo em ${formatFullDate(record.date)}`
+                : `Consumo acima da média histórica em ${formatFullDate(record.date)}`,
+            description: `${formatKwh(record.consumptionKwh)} registrados (${formatPercent(deviationPercent, true)} acima da linha de base de ${formatKwh(baselineAverageKwh)}). Excedente de +${formatKwh(excessKwh)} (${formatCurrencyBRL(estimatedExcessCostBrl)}).`,
+            explanation: `O consumo registrado em ${formatFullDate(record.date)} (${formatKwh(record.consumptionKwh)}) superou em ${formatPercent(deviationPercent)} a média móvel dos ${priorSlice.length} dias imediatamente anteriores (${formatKwh(baselineAverageKwh)}), ultrapassando o limite configurado de +${formatPercent(settings.anomalyThresholdPercent)}.`,
+            reason: `Ultrapassagem do limite estatístico de +${formatPercent(settings.anomalyThresholdPercent)} sobre a média móvel anterior.`,
+            dataContext: `Medição de ${formatKwh(record.consumptionKwh)} (${mType === 'measured' ? 'Medido' : mType === 'estimated' ? 'Estimado' : 'Simulado'}) vs. média de ${priorSlice.length} dias (${formatKwh(baselineAverageKwh)})${linkedEqName ? ` · Associado a: ${linkedEqName}` : ''}.`,
+            recommendedAction: linkedEqName
+              ? `Verificar tempo de funcionamento, termostato e regime de operação de "${linkedEqName}" nesta data.`
+              : 'Conferir se equipamentos térmicos ou de climatização permaneceram acionados fora do horário comercial.',
           });
         }
       }
@@ -633,25 +801,62 @@ export function runEnergyAnalysis(
 
   const sortedAnomalies = [...anomalies].sort((a, b) => b.date.localeCompare(a.date));
   const periodComparison = buildPeriodComparison(sortedRecords, settings.tariffPerKwh);
-  const monthlyComparison = buildMonthlyComparison(sortedRecords, settings.tariffPerKwh);
 
-  const periodCo2Kg = calculateCo2EmissionsKg(periodTotalKwh);
+  // Para o Comparativo Mensal Consolidado, se todos os registros do cenário foram fornecidos e o filtro não é custom,
+  // garantimos que todos os meses consolidados do histórico sejam agrupados sem truncar meses pela metade.
+  const recordsForMonthly =
+    allScenarioRecords && allScenarioRecords.length >= sortedRecords.length
+      ? allScenarioRecords
+      : sortedRecords;
+  const monthlyComparison = buildMonthlyComparison(recordsForMonthly, settings.tariffPerKwh);
+
+  const effectiveEmissionFactor =
+    typeof settings.emissionFactorKgPerKwh === 'number' && settings.emissionFactorKgPerKwh > 0
+      ? settings.emissionFactorKgPerKwh
+      : BRAZIL_GRID_EMISSION_FACTOR_KG_CO2_PER_KWH;
+
+  const emissionFactorSource =
+    settings.emissionFactorSource ?? OFFICIAL_EMISSION_REFERENCE.emissionFactorSource;
+  const emissionFactorYear =
+    settings.emissionFactorYear ?? OFFICIAL_EMISSION_REFERENCE.emissionFactorYear;
+
+  const periodCo2Kg = calculateCo2EmissionsKg(periodTotalKwh, effectiveEmissionFactor);
   const monthlyForecastCo2Kg =
-    monthlyForecastKwh !== null ? calculateCo2EmissionsKg(monthlyForecastKwh) : null;
+    monthlyForecastKwh !== null
+      ? calculateCo2EmissionsKg(monthlyForecastKwh, effectiveEmissionFactor)
+      : null;
   const tenPercentAnnualCo2SavedKg =
     monthlyForecastCo2Kg !== null ? roundTo(monthlyForecastCo2Kg * 0.1 * 12, 2) : null;
   const tenPercentAnnualCostSavedBrl =
     estimatedMonthlyCostBrl !== null ? roundTo(estimatedMonthlyCostBrl * 0.1 * 12, 2) : null;
 
   const environmentalImpact: EnvironmentalImpactSummary = {
-    emissionFactorKgPerKwh: BRAZIL_GRID_EMISSION_FACTOR_KG_CO2_PER_KWH,
+    emissionFactorKgPerKwh: effectiveEmissionFactor,
+    emissionFactorSource,
+    emissionFactorYear,
     periodCo2Kg,
     monthlyForecastCo2Kg,
     tenPercentAnnualCo2SavedKg,
     tenPercentAnnualCostSavedBrl,
-    methodologyNote:
-      'Estimativa calculada com fator médio de referência de 0,0817 kg CO₂e/kWh (matriz elétrica brasileira / SIN). Valor educativo para mensuração de impacto ambiental e uso racional de recursos naturais.',
+    methodologyNote: `Estimativa indireta (Escopo 2) calculada pela fórmula: Emissões (kg CO₂) = Consumo (kWh) × ${effectiveEmissionFactor.toFixed(4).replace('.', ',')} kg CO₂/kWh. Fonte: ${emissionFactorSource} (${emissionFactorYear}). Não representa medição direta de gases.`,
   };
+
+  // Construção unificada de SystemAlerts (Item 7.5: anomalias, aumento entre períodos, equipamento de alta potência, projeção de custo superior e dados insuficientes)
+  const systemAlerts = buildSystemAlerts({
+    sortedRecords,
+    anomalies: sortedAnomalies,
+    periodComparison,
+    equipmentSummaries,
+    activeInstalledPowerWatts,
+    monthlyForecastKwh,
+    estimatedMonthlyCostBrl,
+    estimatedEquipmentMonthlyKwh,
+    estimatedEquipmentMonthlyCostBrl,
+    hasEnoughDataForAnomalies,
+    recordsNeededForAnomalies,
+    settings,
+    alertStates,
+  });
 
   const recommendations = buildRecommendations({
     sortedRecords,
@@ -666,12 +871,15 @@ export function runEnergyAnalysis(
     activeEquipment,
     activeInstalledPowerWatts,
     categoryLoads,
+    equipmentSummaries,
     topActiveEquipment,
     anomalies: sortedAnomalies,
     settings,
   });
 
-  const demoRecordsCount = records.filter((r) => r.isDemo || r.measurementType === 'simulated').length;
+  const demoRecordsCount = records.filter(
+    (r) => r.isDemo || r.measurementType === 'simulated',
+  ).length;
   const demoEquipmentCount = equipment.filter((e) => e.isDemo).length;
   const hasDemoData =
     demoRecordsCount > 0 || demoEquipmentCount > 0 || Boolean(settings.isDemoProfile);
@@ -693,6 +901,7 @@ export function runEnergyAnalysis(
     monthlyForecastKwh,
     estimatedMonthlyCostBrl,
     estimatedDailyCostBrl,
+    estimatedEquipmentDailyKwh,
     estimatedEquipmentMonthlyKwh,
     estimatedEquipmentMonthlyCostBrl,
     forecast,
@@ -711,12 +920,216 @@ export function runEnergyAnalysis(
     equipmentSummaries,
     topActiveEquipment,
     anomalies: sortedAnomalies,
+    systemAlerts,
     recommendations,
     chartData,
     hasDemoData,
     demoRecordsCount,
     demoEquipmentCount,
   };
+}
+
+interface BuildSystemAlertsInput {
+  sortedRecords: ConsumptionRecord[];
+  anomalies: AnomalyAlert[];
+  periodComparison: PeriodComparisonSummary;
+  equipmentSummaries: EquipmentConsumptionSummary[];
+  activeInstalledPowerWatts: number;
+  monthlyForecastKwh: number | null;
+  estimatedMonthlyCostBrl: number | null;
+  estimatedEquipmentMonthlyKwh: number;
+  estimatedEquipmentMonthlyCostBrl: number;
+  hasEnoughDataForAnomalies: boolean;
+  recordsNeededForAnomalies: number;
+  settings: AppSettings;
+  alertStates: Record<string, AlertAcknowledgement>;
+}
+
+function buildSystemAlerts(input: BuildSystemAlertsInput): SystemAlert[] {
+  const alerts: SystemAlert[] = [];
+  const {
+    sortedRecords,
+    anomalies,
+    periodComparison,
+    equipmentSummaries,
+    activeInstalledPowerWatts,
+    monthlyForecastKwh,
+    estimatedMonthlyCostBrl,
+    estimatedEquipmentMonthlyKwh,
+    estimatedEquipmentMonthlyCostBrl,
+    hasEnoughDataForAnomalies,
+    recordsNeededForAnomalies,
+    settings,
+    alertStates,
+  } = input;
+
+  const latestDate =
+    sortedRecords.length > 0 ? sortedRecords[sortedRecords.length - 1].date : getTodayIsoDate();
+
+  // 1. Condição: Dados insuficientes para análise confiável
+  if (!hasEnoughDataForAnomalies) {
+    const id = 'sys_insufficient_data';
+    const ack = alertStates[id];
+    alerts.push({
+      id,
+      title: 'Dados insuficientes para detecção estatística confiável',
+      priority: 'info',
+      category: 'insufficient_data',
+      description:
+        sortedRecords.length === 0
+          ? 'Nenhum registro diário de consumo foi encontrado neste cenário.'
+          : `Apenas ${sortedRecords.length} dia(s) registrado(s). São necessários ao menos ${MIN_RECORDS_FOR_ANOMALIES} dias para estabelecer a média móvel de referência.`,
+      reason: `O motor estatístico exige no mínimo ${MIN_BASELINE_DAYS_FOR_ANOMALY} dias anteriores de linha de base + 1 dia avaliado.`,
+      date: latestDate,
+      dataContext: `Amostra atual: ${sortedRecords.length} de ${MIN_RECORDS_FOR_ANOMALIES} registros mínimos (faltam ${recordsNeededForAnomalies}).`,
+      recommendedAction:
+        'Adicione novos registros diários na página de Registros ou restaure os dados demonstrativos do cenário.',
+      status: ack?.status ?? 'open',
+      acknowledgedBy: ack?.acknowledgedBy,
+      acknowledgedAt: ack?.acknowledgedAt,
+    });
+  }
+
+  // 2. Condição: Consumo diário acima da média histórica (Anomalias detectadas)
+  for (const anomaly of anomalies) {
+    alerts.push({
+      id: anomaly.id,
+      title: anomaly.title,
+      priority: anomaly.severity === 'critical' ? 'critical' : 'warning',
+      category: 'anomaly',
+      description: anomaly.description,
+      reason:
+        anomaly.reason ??
+        `Consumo diário superou em ${formatPercent(anomaly.deviationPercent)} a média móvel anterior (limite: +${formatPercent(settings.anomalyThresholdPercent)}).`,
+      date: anomaly.date,
+      dataContext:
+        anomaly.dataContext ??
+        `Leitura: ${formatKwh(anomaly.consumptionKwh)} · Média base (${anomaly.baselineDaysCount}d): ${formatKwh(anomaly.baselineAverageKwh)} · Excedente: +${formatKwh(anomaly.excessKwh)}.`,
+      recommendedAction:
+        anomaly.recommendedAction ??
+        'Revisar operação de equipamentos térmicos e climatização nesta data.',
+      status: anomaly.status,
+      acknowledgedBy: anomaly.acknowledgedBy,
+      acknowledgedAt: anomaly.acknowledgedAt,
+      measurementType: anomaly.measurementType,
+      deviationPercent: anomaly.deviationPercent,
+      excessKwh: anomaly.excessKwh,
+      estimatedExcessCostBrl: anomaly.estimatedExcessCostBrl,
+      equipmentId: anomaly.equipmentId,
+      recordId: anomaly.recordId,
+    });
+  }
+
+  // 3. Condição: Aumento significativo em relação a períodos anteriores
+  if (
+    periodComparison.variationPercent !== null &&
+    periodComparison.variationPercent >= 6 &&
+    sortedRecords.length >= 8
+  ) {
+    const id = 'sys_period_increase';
+    const ack = alertStates[id];
+    const diffKwh = roundTo(
+      periodComparison.currentPeriodKwh - periodComparison.previousPeriodKwh,
+      1,
+    );
+    const diffCost = calculateEnergyCostBrl(Math.max(0, diffKwh), settings.tariffPerKwh);
+
+    alerts.push({
+      id,
+      title: `Aumento de ${formatPercent(periodComparison.variationPercent, true)} no período recente`,
+      priority: periodComparison.variationPercent >= 15 ? 'critical' : 'warning',
+      category: 'period_increase',
+      description: `A metade mais recente do período analisado (${periodComparison.currentDaysCount} dias) acumulou ${formatKwh(periodComparison.currentPeriodKwh)}, contra ${formatKwh(periodComparison.previousPeriodKwh)} na metade anterior.`,
+      reason:
+        'Elevação consistente da média diária entre duas janelas consecutivas de mesma duração.',
+      date: latestDate,
+      dataContext: `Média recente: ${formatKwh(periodComparison.currentPeriodAvgDailyKwh, 2)}/dia vs. Média anterior: ${formatKwh(periodComparison.previousPeriodAvgDailyKwh, 2)}/dia (+${formatKwh(diffKwh)} / +${formatCurrencyBRL(diffCost)}).`,
+      recommendedAction:
+        'Compare os meses na página de Análises e verifique se houve ampliação de turno ou mudança na regulagem de termostatos.',
+      status: ack?.status ?? 'open',
+      acknowledgedBy: ack?.acknowledgedBy,
+      acknowledgedAt: ack?.acknowledgedAt,
+      deviationPercent: periodComparison.variationPercent,
+      excessKwh: diffKwh,
+      estimatedExcessCostBrl: diffCost,
+    });
+  }
+
+  // 4. Condição: Equipamento com potência elevada / concentração crítica de carga
+  const activeSummaries = equipmentSummaries.filter((s) => s.equipment.status === 'active');
+  if (activeSummaries.length > 0 && activeInstalledPowerWatts > 0) {
+    const highestPowerEq = [...activeSummaries].sort(
+      (a, b) => b.totalRatedPowerWatts - a.totalRatedPowerWatts,
+    )[0];
+
+    if (
+      highestPowerEq &&
+      (highestPowerEq.shareOfInstalledPowerPercent >= 35 ||
+        highestPowerEq.totalRatedPowerWatts >= 2500)
+    ) {
+      const id = `sys_high_power_${highestPowerEq.equipment.id}`;
+      const ack = alertStates[id];
+      const eq = highestPowerEq.equipment;
+
+      alerts.push({
+        id,
+        title: `Equipamento de alta potência: ${eq.name}`,
+        priority: highestPowerEq.shareOfInstalledPowerPercent >= 50 ? 'warning' : 'info',
+        category: 'high_power_equipment',
+        description: `"${eq.name}" (${eq.manufacturer ? `${eq.manufacturer} ${eq.model ?? ''}` : eq.category}) concentra ${formatPower(highestPowerEq.totalRatedPowerWatts)} (${formatPercent(highestPowerEq.shareOfInstalledPowerPercent)} da potência ativa instalada).`,
+        reason:
+          'Concentração igual ou superior a 35% da potência nominal instalada ou carga superior a 2,5 kW.',
+        date: latestDate,
+        dataContext: `Potência total: ${formatPower(highestPowerEq.totalRatedPowerWatts)} (${eq.quantity ?? 1}x ${eq.powerWatts} W) · Uso: ${eq.dailyUsageHours ?? 8}h/dia (fator ${Math.round(highestPowerEq.effectiveUsageFactor * 100)}%) · Estimativa: ${formatKwh(highestPowerEq.estimatedMonthlyKwh)}/mês (${formatCurrencyBRL(highestPowerEq.estimatedMonthlyCostBrl)}).`,
+        recommendedAction:
+          'Evitar acionamento simultâneo com outras cargas térmicas pesadas e revisar o tempo de pré-aquecimento ou ociosidade.',
+        status: ack?.status ?? 'open',
+        acknowledgedBy: ack?.acknowledgedBy,
+        acknowledgedAt: ack?.acknowledgedAt,
+        equipmentId: eq.id,
+      });
+    }
+  }
+
+  // 5. Condição: Projeção de custo superior ao padrão estimado pelo inventário
+  if (
+    monthlyForecastKwh !== null &&
+    estimatedMonthlyCostBrl !== null &&
+    estimatedEquipmentMonthlyKwh > 0
+  ) {
+    const ratioPct = roundTo(
+      ((monthlyForecastKwh - estimatedEquipmentMonthlyKwh) / estimatedEquipmentMonthlyKwh) * 100,
+      1,
+    );
+    if (ratioPct >= 10) {
+      const id = 'sys_cost_projection_above_inventory';
+      const ack = alertStates[id];
+      const diffKwh = roundTo(monthlyForecastKwh - estimatedEquipmentMonthlyKwh, 1);
+      const diffBrl = roundTo(estimatedMonthlyCostBrl - estimatedEquipmentMonthlyCostBrl, 2);
+
+      alerts.push({
+        id,
+        title: `Projeção mensal (${formatCurrencyBRL(estimatedMonthlyCostBrl)}) supera estimativa do inventário em ${formatPercent(ratioPct, true)}`,
+        priority: ratioPct >= 25 ? 'critical' : 'warning',
+        category: 'cost_projection',
+        description: `O ritmo das leituras diárias projeta ${formatKwh(monthlyForecastKwh)}/mês (${formatCurrencyBRL(estimatedMonthlyCostBrl)}), superando o consumo estimado pelos equipamentos cadastrados (${formatKwh(estimatedEquipmentMonthlyKwh)}/mês · ${formatCurrencyBRL(estimatedEquipmentMonthlyCostBrl)}).`,
+        reason:
+          'As medições diárias estão acima da soma teórica das horas e fatores de uso cadastrados no inventário.',
+        date: latestDate,
+        dataContext: `Diferença projetada: +${formatKwh(diffKwh)}/mês (+${formatCurrencyBRL(diffBrl)}/mês) considerando a tarifa de ${formatCurrencyBRL(settings.tariffPerKwh)}/kWh.`,
+        recommendedAction:
+          'Verifique se há equipamentos operando por mais horas que o previsto ou se existem cargas não cadastradas no inventário.',
+        status: ack?.status ?? 'open',
+        acknowledgedBy: ack?.acknowledgedBy,
+        acknowledgedAt: ack?.acknowledgedAt,
+        deviationPercent: ratioPct,
+        excessKwh: diffKwh,
+        estimatedExcessCostBrl: diffBrl,
+      });
+    }
+  }
+
+  return alerts;
 }
 
 interface RecommendationInput {
@@ -732,6 +1145,7 @@ interface RecommendationInput {
   activeEquipment: Equipment[];
   activeInstalledPowerWatts: number;
   categoryLoads: CategoryLoadSummary[];
+  equipmentSummaries: EquipmentConsumptionSummary[];
   topActiveEquipment: Equipment[];
   anomalies: AnomalyAlert[];
   settings: AppSettings;
@@ -749,6 +1163,7 @@ function buildRecommendations(input: RecommendationInput): Recommendation[] {
     activeEquipment,
     activeInstalledPowerWatts,
     categoryLoads,
+    equipmentSummaries,
     topActiveEquipment,
     anomalies,
     settings,
@@ -760,15 +1175,15 @@ function buildRecommendations(input: RecommendationInput): Recommendation[] {
       id: 'rec_insufficient_history',
       priority: 'info',
       category: 'Base de dados',
-      title: 'Amplie o histórico diário para ativar a detecção completa',
+      title: 'Amplie o histórico diário para ativar a detecção estatística completa',
       description:
         sortedRecords.length === 0
-          ? 'Nenhum consumo diário registrado até o momento. Adicione pelo menos 4 dias de leitura para habilitar média histórica, previsão mensal e detecção automática de anomalias.'
-          : `Você possui ${sortedRecords.length} registro(s). Faltam ${recordsNeededForAnomalies} dia(s) para o motor local comparar consumo recente com a média dos dias anteriores.`,
+          ? 'Nenhum consumo diário registrado até o momento. Adicione pelo menos 4 dias de leitura para habilitar média histórica, projeção mensal e detecção automática de anomalias.'
+          : `Você possui ${sortedRecords.length} registro(s). Faltam ${recordsNeededForAnomalies} dia(s) para o motor local comparar o consumo diário com a média móvel anterior.`,
       reason: 'A janela mínima de comparação estatística exige 3 dias anteriores de base e 1 dia analisado.',
       evidence: `${sortedRecords.length} de ${MIN_RECORDS_FOR_ANOMALIES} leituras diárias mínimas registradas.`,
-      estimatedImpact: 'Habilita alertas automáticos de desperdício e previsão mensal de faturamento.',
-      suggestedAction: 'Inserir leituras diárias no módulo de Medições ou importar histórico.',
+      estimatedImpact: 'Habilita alertas automáticos de variação atípica e projeção mensal de custos.',
+      suggestedAction: 'Inserir leituras diárias na página de Registros ou selecionar um cenário demonstrativo completo.',
       metricBadge: `${sortedRecords.length}/${MIN_RECORDS_FOR_ANOMALIES} dias`,
       actionTarget: 'records',
       actionLabel: 'Registrar consumo',
@@ -781,13 +1196,13 @@ function buildRecommendations(input: RecommendationInput): Recommendation[] {
       id: 'rec_no_active_equipment',
       priority: 'info',
       category: 'Inventário',
-      title: 'Cadastre seus equipamentos ativos para mapear a carga',
+      title: 'Cadastre os equipamentos ativos para mapear a potência instalada',
       description:
-        'Com a potência nominal dos equipamentos cadastrada, o WattWise identifica quais categorias concentram maior demanda e contextualiza os picos de consumo.',
-      reason: 'Não há equipamentos com status ativo vinculados à organização.',
+        'Com a potência nominal (W) e as horas de uso cadastradas, o WattWise identifica quais equipamentos concentram maior demanda e explica a composição do consumo.',
+      reason: 'Não há equipamentos com status ativo neste cenário.',
       evidence: '0 W de potência nominal ativa instalada.',
-      estimatedImpact: 'Permite separar potência instalada (kW) de consumo estimado por equipamento (kWh).',
-      suggestedAction: 'Cadastrar os principais equipamentos elétricos com potência (W), quantidade e horas de uso.',
+      estimatedImpact: 'Permite cruzar potência nominal (kW) com consumo mensal estimado (kWh).',
+      suggestedAction: 'Cadastrar os principais equipamentos elétricos com fabricante, modelo, potência (W), quantidade e horas de uso.',
       metricBadge: '0 W ativos',
       actionTarget: 'equipment',
       actionLabel: 'Cadastrar equipamentos',
@@ -798,151 +1213,121 @@ function buildRecommendations(input: RecommendationInput): Recommendation[] {
   if (anomalies.length > 0 && latestRecord) {
     const latestAnomaly = anomalies[0];
     const isMostRecentDay = latestAnomaly.date === latestRecord.date;
-    const topConsumer = topActiveEquipment[0];
-    const topPower = topConsumer
-      ? topConsumer.powerWatts * Math.max(1, topConsumer.quantity ?? 1)
-      : 0;
+    const topConsumer = equipmentSummaries.find((s) => s.equipment.status === 'active');
 
     recommendations.push({
       id: 'rec_recent_anomaly',
       priority: 'high',
       category: 'Anomalia detectada',
       title: isMostRecentDay
-        ? 'Investigue o pico registrado no último dia'
-        : `Revise o pico atípico de ${formatFullDate(latestAnomaly.date)}`,
+        ? `Investigue o pico registrado em ${formatFullDate(latestAnomaly.date)}`
+        : `Revise o desvio atípico de ${formatFullDate(latestAnomaly.date)}`,
       description: topConsumer
-        ? `O consumo atingiu ${formatKwh(latestAnomaly.consumptionKwh)} (${formatPercent(latestAnomaly.deviationPercent, true)} acima da base). Verifique o tempo de uso de cargas críticas como "${topConsumer.name}" (${formatPower(topPower)}).`
+        ? `O consumo atingiu ${formatKwh(latestAnomaly.consumptionKwh)} (${formatPercent(latestAnomaly.deviationPercent, true)} acima da base). Verifique o tempo de operação de cargas principais como "${topConsumer.equipment.name}" (${formatPower(topConsumer.totalRatedPowerWatts)}).`
         : `O consumo atingiu ${formatKwh(latestAnomaly.consumptionKwh)} (${formatPercent(latestAnomaly.deviationPercent, true)} acima da base), gerando excedente estimado de ${formatCurrencyBRL(latestAnomaly.estimatedExcessCostBrl)}.`,
-      reason: `O consumo diário superou o limite de alerta configurado (${formatPercent(settings.anomalyThresholdPercent)}).`,
+      reason: `O consumo diário superou o limite de alerta configurado (+${formatPercent(settings.anomalyThresholdPercent)} sobre a média móvel de ${latestAnomaly.baselineDaysCount} dias).`,
       evidence: `Leitura de ${formatKwh(latestAnomaly.consumptionKwh)} em ${formatFullDate(latestAnomaly.date)} contra média anterior de ${formatKwh(latestAnomaly.baselineAverageKwh)} (+${formatKwh(latestAnomaly.excessKwh)}).`,
-      estimatedImpact: `Custo excedente estimado de ${formatCurrencyBRL(latestAnomaly.estimatedExcessCostBrl)} neste evento.`,
+      estimatedImpact: `Excedente estimado neste evento: ${formatCurrencyBRL(latestAnomaly.estimatedExcessCostBrl)} (baseado na tarifa de ${formatCurrencyBRL(settings.tariffPerKwh)}/kWh).`,
       suggestedAction: topConsumer
-        ? `Auditar horário de funcionamento de "${topConsumer.name}" e registrar tratativa na tela de Alertas.`
-        : 'Auditar cargas acionadas fora do expediente e reconhecer o alerta após verificação.',
+        ? `Auditar regime de funcionamento de "${topConsumer.equipment.name}" e registrar tratativa na página de Alertas.`
+        : 'Auditar cargas acionadas fora do expediente e registrar tratativa na página de Alertas.',
       metricBadge: `+${formatCurrencyBRL(latestAnomaly.estimatedExcessCostBrl)}`,
       actionTarget: 'alerts',
-      actionLabel: 'Gerenciar alerta',
+      actionLabel: 'Ver detalhes nos Alertas',
     });
   }
 
-  // Regra 4: Tendência de alta recente (últimos 5 dias vs dias anteriores)
-  if (sortedRecords.length >= 10) {
-    const recentSlice = sortedRecords.slice(-5);
-    const earlierSlice = sortedRecords.slice(-10, -5);
-    const recentAvg = calculateMean(recentSlice.map((r) => r.consumptionKwh));
-    const earlierAvg = calculateMean(earlierSlice.map((r) => r.consumptionKwh));
-
-    if (recentAvg !== null && earlierAvg !== null && earlierAvg > 0) {
-      const trendPct = roundTo(((recentAvg - earlierAvg) / earlierAvg) * 100, 1);
-      if (trendPct >= 8) {
-        const monthlyImpact = roundTo(
-          (recentAvg - earlierAvg) * DAYS_IN_MONTH * settings.tariffPerKwh,
-          2,
-        );
-        recommendations.push({
-          id: 'rec_upward_trend',
-          priority: 'medium',
-          category: 'Tendência',
-          title: 'Tendência de elevação nos últimos 5 dias',
-          description: `A média recente (${formatKwh(recentAvg)}/dia) está ${formatPercent(trendPct, true)} acima dos 5 dias anteriores (${formatKwh(earlierAvg)}/dia). Mantido esse ritmo, o acréscimo mensal estimado é de ${formatCurrencyBRL(monthlyImpact)}.`,
-          reason: 'Elevação persistente do patamar médio diário na janela recente de 5 dias.',
-          evidence: `Média subiu de ${formatKwh(earlierAvg)}/dia para ${formatKwh(recentAvg)}/dia (${formatPercent(trendPct, true)}).`,
-          estimatedImpact: `Acréscimo projetado de ${formatCurrencyBRL(monthlyImpact)}/mês caso o patamar atual se mantenha.`,
-          suggestedAction: 'Comparar períodos no módulo de Análises e verificar equipamentos que permaneceram ligados após o expediente.',
-          metricBadge: `${formatPercent(trendPct, true)} em 5 dias`,
-          actionTarget: 'analysis',
-          actionLabel: 'Analisar tendência',
-        });
-      }
-    }
-  }
-
-  // Regra 5: Concentração de potência em Climatização (>= 30% da potência ativa)
-  const hvacLoad = categoryLoads.find((c) => c.category === 'Climatização');
-  if (hvacLoad && hvacLoad.percentage >= 30) {
+  // Regra 4: Equipamento de maior consumo mensal estimado no inventário
+  const topEnergySummary = equipmentSummaries.find((s) => s.equipment.status === 'active');
+  if (topEnergySummary && topEnergySummary.estimatedMonthlyKwh > 0) {
+    const eq = topEnergySummary.equipment;
     recommendations.push({
-      id: 'rec_hvac_optimization',
+      id: `rec_top_equipment_${eq.id}`,
       priority: 'medium',
-      category: 'Climatização',
-      title: 'Climatização concentra parcela relevante da carga instalada',
-      description: `Equipamentos de climatização somam ${formatPower(hvacLoad.powerWatts)} (${formatPercent(hvacLoad.percentage)} da potência ativa). Ajustar o termostato para 23 °C–24 °C, limpar filtros periodicamente e desligar fora do expediente reduz picos diários.`,
-      reason: 'Alta participação de sistemas térmicos na potência nominal instalada.',
-      evidence: `${hvacLoad.activeCount} equipamento(s) de Climatização somando ${formatPower(hvacLoad.powerWatts)} (${formatPercent(hvacLoad.percentage)} da carga ativa) e consumo estimado de ${formatKwh(hvacLoad.estimatedMonthlyKwh)}/mês.`,
-      estimatedImpact: `Reduzir 1 hora diária de operação em Climatização pode economizar cerca de ${formatCurrencyBRL(roundTo(hvacLoad.estimatedMonthlyCostBrl * 0.125, 2))}/mês (estimado).`,
-      suggestedAction: 'Padronizar setpoint em 23 °C–24 °C e revisar programação horária dos aparelhos.',
-      metricBadge: `${formatPercent(hvacLoad.percentage)} da carga`,
+      category: eq.category,
+      title: `Acompanhe o regime de uso de "${eq.name}"`,
+      description: `Este equipamento lidera o consumo estimado do estabelecimento com ${formatKwh(topEnergySummary.estimatedMonthlyKwh)}/mês (${formatPercent(topEnergySummary.shareOfEstimatedEnergyPercent)} do total estimado pelo inventário), considerando ${eq.dailyUsageHours ?? 8}h/dia e fator de ciclo de ${Math.round(topEnergySummary.effectiveUsageFactor * 100)}%.`,
+      reason: `Maior participação individual no consumo mensal estimado (${formatPercent(topEnergySummary.shareOfEstimatedEnergyPercent)}).`,
+      evidence: `${eq.quantity ?? 1}x ${eq.powerWatts} W (${formatPower(topEnergySummary.totalRatedPowerWatts)}) × ${eq.dailyUsageHours ?? 8}h/dia × fator ${topEnergySummary.effectiveUsageFactor} = ${formatKwh(topEnergySummary.estimatedDailyKwh, 2)}/dia.`,
+      estimatedImpact: `Representa custo estimado de ${formatCurrencyBRL(topEnergySummary.estimatedMonthlyCostBrl)}/mês na tarifa atual (sem prometer percentual fixo de redução).`,
+      suggestedAction:
+        'Evitar funcionamento em vazio (sem carga de produção/atendimento) e manter manutenção preventiva em dia.',
+      metricBadge: `${formatKwh(topEnergySummary.estimatedMonthlyKwh)}/mês`,
       actionTarget: 'equipment',
-      actionLabel: 'Revisar equipamentos',
+      actionLabel: 'Inspecionar equipamento',
     });
   }
 
-  // Regra 6: Concentração em Maquinário ou Refrigeração (>= 30%)
-  const heavyLoad = categoryLoads.find(
-    (c) => (c.category === 'Maquinário' || c.category === 'Refrigeração') && c.percentage >= 30,
+  // Regra 5: Concentração em Climatização ou Refrigeração
+  const thermalLoad = categoryLoads.find(
+    (c) => (c.category === 'Climatização' || c.category === 'Refrigeração') && c.energyPercentage >= 22,
   );
-  if (heavyLoad) {
+  if (thermalLoad) {
     recommendations.push({
-      id: `rec_heavy_${heavyLoad.category}`,
+      id: `rec_thermal_${thermalLoad.category}`,
       priority: 'medium',
-      category: heavyLoad.category,
-      title: `Otimize ciclos de operação em ${heavyLoad.category}`,
-      description: `${heavyLoad.category} representa ${formatPercent(heavyLoad.percentage)} da potência nominal ativa (${formatPower(heavyLoad.powerWatts)}). Evitar acionamentos simultâneos e revisar manutenção preventiva ajuda a estabilizar a demanda.`,
-      reason: `Concentração superior a 30% da potência nominal em ${heavyLoad.category}.`,
-      evidence: `${formatPower(heavyLoad.powerWatts)} instalados (${formatPercent(heavyLoad.percentage)} do total ativo), com consumo estimado de ${formatKwh(heavyLoad.estimatedMonthlyKwh)}/mês.`,
-      estimatedImpact: `Custo estimado da categoria: ${formatCurrencyBRL(heavyLoad.estimatedMonthlyCostBrl)}/mês.`,
-      suggestedAction: 'Escalonar partidas de motores/fornos e inspecionar vedações térmicas.',
-      metricBadge: formatPower(heavyLoad.powerWatts),
-      actionTarget: 'equipment',
-      actionLabel: 'Ver inventário',
+      category: thermalLoad.category,
+      title: `Boas práticas térmicas em ${thermalLoad.category}`,
+      description: `A categoria ${thermalLoad.category} responde por ${formatPercent(thermalLoad.energyPercentage)} do consumo estimado (${formatKwh(thermalLoad.estimatedMonthlyKwh)}/mês) e ${formatPower(thermalLoad.powerWatts)} de potência instalada.`,
+      reason: `Participação relevante (${formatPercent(thermalLoad.energyPercentage)}) de sistemas de troca térmica no balanço energético.`,
+      evidence: `${thermalLoad.activeCount} equipamento(s) ativo(s) somando ${formatPower(thermalLoad.powerWatts)} e ${formatKwh(thermalLoad.estimatedDailyKwh, 2)}/dia.`,
+      estimatedImpact: `Custo operacional estimado da categoria: ${formatCurrencyBRL(thermalLoad.estimatedMonthlyCostBrl)}/mês.`,
+      suggestedAction:
+        thermalLoad.category === 'Climatização'
+          ? 'Manter filtros limpos, portas/janelas vedadas e regular o setpoint entre 23 °C e 24 °C.'
+          : 'Verificar borrachas de vedação das portas, afastamento das grades traseiras e evitar inserir produtos quentes.',
+      metricBadge: `${formatPercent(thermalLoad.energyPercentage)} do consumo`,
+      actionTarget: 'analysis',
+      actionLabel: 'Ver distribuição por categoria',
     });
   }
 
-  // Regra 7: Simulação objetiva de economia de 10% baseada na tarifa configurada
+  // Regra 6: Contextualização tarifária e simulação de sensibilidade
   if (hasEnoughDataForForecast && estimatedMonthlyCostBrl !== null && estimatedMonthlyCostBrl > 0) {
-    const potentialTenPercentSavings = roundTo(estimatedMonthlyCostBrl * 0.1, 2);
     recommendations.push({
-      id: 'rec_tariff_savings_target',
+      id: 'rec_tariff_reference_context',
       priority: 'info',
-      category: 'Meta de eficiência',
-      title: 'Impacto financeiro de uma redução de 10%',
-      description: `Com a tarifa atual de ${formatCurrencyBRL(settings.tariffPerKwh)}/kWh e previsão de ${formatCurrencyBRL(estimatedMonthlyCostBrl)}/mês, reduzir 10% do consumo diário gera economia estimada de ${formatCurrencyBRL(potentialTenPercentSavings)} por mês.`,
-      reason: 'Quantificação financeira de meta operacional de eficiência de 10%.',
-      evidence: `Previsão mensal de ${formatCurrencyBRL(estimatedMonthlyCostBrl)} calculada com tarifa de ${formatCurrencyBRL(settings.tariffPerKwh)}/kWh.`,
-      estimatedImpact: `Potencial estimado de até ${formatCurrencyBRL(potentialTenPercentSavings)}/mês (${formatCurrencyBRL(roundTo(potentialTenPercentSavings * 12, 2))}/ano) caso a meta de 10% seja atingida.`,
-      suggestedAction: 'Acompanhar relatórios semanais e priorizar os 3 equipamentos de maior consumo estimado.',
-      metricBadge: `-${formatCurrencyBRL(potentialTenPercentSavings)}/mês`,
-      actionTarget: 'reports',
-      actionLabel: 'Gerar relatório',
+      category: 'Gestão Tarifária',
+      title: 'Verifique a adequação da tarifa e bandeira tarifária na fatura',
+      description: `Os custos exibidos utilizam a tarifa configurada de ${formatCurrencyBRL(settings.tariffPerKwh)}/kWh (${settings.referenceLocation ?? OFFICIAL_TARIFF_REFERENCE.referenceLocation}). Tributos variáveis (ICMS, PIS/COFINS), bandeiras tarifárias e CIP alteram o valor final faturado.`,
+      reason: 'Transparência metodológica entre estimativa energética (kWh × R$/kWh) e fatura real da distribuidora.',
+      evidence: `Previsão atual de ${formatKwh(input.monthlyForecastKwh ?? 0)} × ${formatCurrencyBRL(settings.tariffPerKwh)}/kWh = ${formatCurrencyBRL(estimatedMonthlyCostBrl)}/mês.`,
+      estimatedImpact: 'Permite ajustar a tarifa em Configurações para refletir a tarifa efetiva com tributos da sua conta de luz.',
+      suggestedAction: 'Consultar o valor do kWh faturado na conta de energia do estabelecimento e atualizar em Configurações.',
+      metricBadge: `${formatCurrencyBRL(settings.tariffPerKwh)}/kWh`,
+      actionTarget: 'settings',
+      actionLabel: 'Configurar tarifa',
     });
   }
 
-  // Regra 8: Operação estável sem anomalias
+  // Regra 7: Operação estável sem anomalias
   if (hasEnoughDataForAnomalies && anomalies.length === 0) {
     recommendations.push({
       id: 'rec_stable_operation',
       priority: 'positive',
       category: 'Operação estável',
-      title: 'Consumo dentro do padrão esperado',
-      description: `Nenhum dia excedeu o limite configurado de ${formatPercent(settings.anomalyThresholdPercent)} acima da média dos dias anteriores. Continue registrando o consumo diário para manter a precisão da previsão.`,
-      reason: 'Todas as leituras analisadas permaneceram dentro da faixa estatística normal.',
-      evidence: `0 anomalias acima de +${formatPercent(settings.anomalyThresholdPercent)} em ${sortedRecords.length} dias avaliados.`,
-      estimatedImpact: 'Previsibilidade orçamentária mantida sem custos excedentes por picos.',
-      suggestedAction: 'Manter a rotina diária de registro no módulo de Medições.',
-      metricBadge: `Limite: ${formatPercent(settings.anomalyThresholdPercent)}`,
+      title: 'Consumo diário dentro da faixa estatística esperada',
+      description: `Nenhum dia avaliado excedeu o limite configurado de +${formatPercent(settings.anomalyThresholdPercent)} sobre a média móvel anterior.`,
+      reason: 'Todas as leituras do período permaneceram dentro do padrão histórico do estabelecimento.',
+      evidence: `0 anomalias acima de +${formatPercent(settings.anomalyThresholdPercent)} em ${sortedRecords.length} dias analisados.`,
+      estimatedImpact: 'Estabilidade operacional sem picos atípicos identificados no período.',
+      suggestedAction: 'Manter a rotina de acompanhamento diário na página de Registros.',
+      metricBadge: `Limite: +${formatPercent(settings.anomalyThresholdPercent)}`,
     });
   }
 
   if (activeInstalledPowerWatts > 0 && recommendations.length === 0) {
+    const topEq = topActiveEquipment[0];
     recommendations.push({
       id: 'rec_general_monitoring',
       priority: 'info',
       category: 'Monitoramento',
-      title: 'Acompanhamento ativo configurado',
-      description: `${activeEquipment.length} equipamento(s) ativo(s) totalizando ${formatPower(activeInstalledPowerWatts)}. Registre o consumo diariamente para receber alertas contextualizados.`,
-      reason: 'Inventário de equipamentos configurado e pronto para cruzamento com leituras.',
+      title: 'Inventário elétrico mapeado e pronto para análise',
+      description: `${activeEquipment.length} equipamento(s) ativo(s) totalizando ${formatPower(activeInstalledPowerWatts)}${topEq ? `, liderados por "${topEq.name}"` : ''}.`,
+      reason: 'Inventário de equipamentos configurado para cruzamento com leituras diárias.',
       evidence: `${activeEquipment.length} equipamento(s) ativo(s) (${formatPower(activeInstalledPowerWatts)}).`,
-      estimatedImpact: 'Permite rastrear desvios entre potência instalada e consumo medido.',
-      suggestedAction: 'Registrar leituras diárias no módulo de Medições.',
+      estimatedImpact: 'Permite rastrear desvios entre potência instalada e consumo registrado.',
+      suggestedAction: 'Registrar leituras diárias na página de Registros.',
       metricBadge: formatPower(activeInstalledPowerWatts),
     });
   }

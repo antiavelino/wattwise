@@ -1,50 +1,70 @@
 import React from 'react';
-import { FlaskConical, RotateCcw, Settings2 } from 'lucide-react';
+import { FlaskConical, Layers, RotateCcw } from 'lucide-react';
 import { useWattWise } from '../../context/WattWiseContext';
+import { DEMO_SCENARIO_LIST } from '../../data/demoData';
 
 export const DemoBanner: React.FC = () => {
-  const { analysis, workspaceMode, setActiveSection, restoreDemoData } = useWattWise();
-
-  if (!analysis.hasDemoData && workspaceMode !== 'demo') return null;
+  const {
+    analysis,
+    state,
+    activeSection,
+    activeScenarioId,
+    activeScenarioMeta,
+    switchScenario,
+    setActiveSection,
+    restoreDemoData,
+  } = useWattWise();
 
   return (
-    <div className="demo-banner" role="status">
+    <div className="demo-banner no-print" role="status">
       <div className="demo-banner-main">
         <span className="demo-banner-icon" aria-hidden="true">
           <FlaskConical size={16} />
         </span>
-        <p className="demo-banner-text">
-          <strong>Modo Demonstração (Dados Simulados):</strong>{' '}
-          {analysis.demoRecordsCount > 0 || analysis.demoEquipmentCount > 0 ? (
-            <>
-              exibindo {analysis.demoRecordsCount} registro(s) e {analysis.demoEquipmentCount}{' '}
-              equipamento(s) fictícios para demonstração — totalmente isolados de contas reais.
-            </>
-          ) : (
-            <>ambiente demonstrativo pronto para experimentação sem necessidade de login.</>
-          )}
-        </p>
+        <div>
+          <p className="demo-banner-text">
+            <strong>{state.settings.establishmentName}:</strong>{' '}
+            {analysis.totalEquipmentCount} equipamentos reais verificados · {analysis.totalRecords}{' '}
+            dias simulados (isolado no LocalStorage).
+          </p>
+        </div>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        {workspaceMode === 'demo' && (
+      <div className="scenario-quickbar-pills" role="group" aria-label="Alternar cenário demonstrativo">
+        {DEMO_SCENARIO_LIST.map((sc) => (
+          <button
+            key={sc.id}
+            type="button"
+            className={`scenario-pill-btn ${
+              sc.id === activeScenarioId ? 'scenario-pill-btn--active' : ''
+            }`}
+            onClick={() => switchScenario(sc.id)}
+            title={`Mudar para o cenário ${sc.shortLabel}`}
+          >
+            {sc.shortLabel}
+          </button>
+        ))}
+
+        {activeSection !== 'demos' && (
           <button
             type="button"
             className="demo-banner-action"
-            onClick={restoreDemoData}
-            title="Restaurar o conjunto original de 8 equipamentos e 16 dias simulados"
+            onClick={() => setActiveSection('demos')}
+            title="Comparar os 4 cenários demonstrativos"
           >
-            <RotateCcw size={14} />
-            <span>Restaurar Demo</span>
+            <Layers size={13} />
+            <span>Comparar</span>
           </button>
         )}
+
         <button
           type="button"
           className="demo-banner-action"
-          onClick={() => setActiveSection('settings')}
+          onClick={restoreDemoData}
+          title={`Restaurar somente os dados originais de ${activeScenarioMeta.shortLabel}`}
         >
-          <Settings2 size={14} />
-          <span>Gerenciar dados</span>
+          <RotateCcw size={13} />
+          <span>Restaurar {activeScenarioMeta.shortLabel}</span>
         </button>
       </div>
     </div>

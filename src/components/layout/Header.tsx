@@ -1,5 +1,5 @@
 import React from 'react';
-import { Database, Menu, Moon, Plus, SlidersHorizontal, Sun } from 'lucide-react';
+import { Menu, Moon, Plus, SlidersHorizontal, Sun } from 'lucide-react';
 import { useWattWise } from '../../context/WattWiseContext';
 import { NavSection, PeriodFilter } from '../../types/energy';
 
@@ -12,40 +12,48 @@ interface HeaderProps {
 
 const SECTION_META: Record<NavSection, { title: string; subtitle: string }> = {
   dashboard: {
-    title: 'Visão Geral de Energia',
-    subtitle: 'Monitoramento diário, detecção local de anomalias, custos e impacto ambiental',
+    title: 'Painel Geral de Energia',
+    subtitle: 'WattWise transforma dados de consumo em decisões mais inteligentes',
+  },
+  demos: {
+    title: 'Cenários de Demonstração',
+    subtitle: '4 estabelecimentos comerciais isolados com equipamentos reais verificados',
   },
   equipment: {
-    title: 'Inventário de Equipamentos',
-    subtitle: 'Gerencie cargas instaladas, categorias, consumo estimado e potência nominal ativa',
+    title: 'Equipamentos e Especificações Técnicas',
+    subtitle: 'Gerencie fabricantes, modelos, potência nominal (W), fator de operação e fontes',
   },
   records: {
-    title: 'Registros de Consumo',
-    subtitle: 'Histórico diário e leituras cumulativas utilizados pelo motor de análise e previsão',
+    title: 'Registros e Leituras de Consumo',
+    subtitle: 'Consumo diário em kWh e cálculo de diferenças em leituras acumuladas de medidor',
   },
   analysis: {
-    title: 'Motor de Inteligência Energética',
-    subtitle: 'Fórmulas físicas, regressão linear, confiança da previsão e recomendações com evidência',
+    title: 'Análises Energéticas e Comparativo Mensal',
+    subtitle: 'Separação física de grandezas, consolidação mensal, regressão linear e participação',
   },
   alerts: {
-    title: 'Central de Alertas e Anomalias',
-    subtitle: 'Gerencie desvios estatísticos com reconhecimento e resolução operacional',
+    title: 'Alertas e Recomendações Operacionais',
+    subtitle: 'Diagnóstico estruturado com motivo, evidência nos dados e ação recomendada',
   },
   reports: {
     title: 'Relatórios Executivos e Exportação',
     subtitle: 'Comparativo de períodos e exportação estruturada em CSV, JSON e impressão PDF',
   },
+  about: {
+    title: 'Guia do Projeto, Fórmulas e Premissas',
+    subtitle: 'Conceitos de potência (W), consumo (kWh), tarifa ANEEL e fator ambiental SIN/MCTI',
+  },
   organization: {
-    title: 'Gestão Multi-Tenant da Organização',
-    subtitle: 'Identificação da unidade, alternância de ambientes e trilha de auditoria (Audit Logs)',
+    title: 'Gestão da Organização',
+    subtitle: 'Identificação da unidade e trilha de auditoria',
   },
   team: {
-    title: 'Equipe e Controle de Acesso (RBAC)',
-    subtitle: 'Membros, convites e permissões por papel (Owner, Admin, Operator e Viewer)',
+    title: 'Equipe e Permissões',
+    subtitle: 'Membros e controle de acesso',
   },
   settings: {
-    title: 'Configurações do Ambiente',
-    subtitle: 'Defina estabelecimento, tarifa de energia, sensibilidade de alertas e dados locais',
+    title: 'Configurações, Tarifas e Preferências',
+    subtitle: 'Defina tarifa energética (R$/kWh), referência ANEEL, tema visual e dados do cenário',
   },
 };
 
@@ -53,7 +61,6 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenMobileMenu,
   onQuickAddRecord,
   onQuickAddEquipment,
-  onOpenMigrationModal,
 }) => {
   const {
     theme,
@@ -63,12 +70,10 @@ export const Header: React.FC<HeaderProps> = ({
     state,
     periodFilter,
     setPeriodFilter,
-    workspaceMode,
-    legacyMigrationPreview,
     activeRole,
   } = useWattWise();
 
-  const meta = SECTION_META[activeSection];
+  const meta = SECTION_META[activeSection] ?? SECTION_META.dashboard;
   const canMutate = activeRole !== 'viewer';
 
   return (
@@ -98,25 +103,12 @@ export const Header: React.FC<HeaderProps> = ({
           aria-label="Alternar tema visual"
         >
           {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
-          <span className="btn-sm-hide-label">{theme === 'dark' ? 'Claro' : 'Escuro'}</span>
+          <span className="btn-sm-hide-label">{theme === 'dark' ? 'Modo Claro' : 'Modo Escuro'}</span>
         </button>
 
-        {workspaceMode === 'saas' &&
-          legacyMigrationPreview.hasLegacyData &&
-          !legacyMigrationPreview.alreadyMigratedToCurrentOrg &&
-          canMutate && (
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm-hide-label"
-              onClick={onOpenMigrationModal}
-              title="Importar dados detectados no LocalStorage deste navegador"
-            >
-              <Database size={15} />
-              <span>Importar dados locais</span>
-            </button>
-          )}
-
-        {(activeSection === 'dashboard' || activeSection === 'analysis') && (
+        {(activeSection === 'dashboard' ||
+          activeSection === 'analysis' ||
+          activeSection === 'records') && (
           <select
             className="form-input form-input--compact btn-sm-hide-label"
             value={periodFilter}
@@ -136,10 +128,10 @@ export const Header: React.FC<HeaderProps> = ({
               type="button"
               className="btn btn-secondary btn-sm-hide-label"
               onClick={() => setActiveSection('settings')}
-              title={`Limite atual de anomalia: ${state.settings.anomalyThresholdPercent}%`}
+              title={`Tarifa atual: R$ ${state.settings.tariffPerKwh.toFixed(2).replace('.', ',')}/kWh · Limite: ${state.settings.anomalyThresholdPercent}%`}
             >
               <SlidersHorizontal size={16} />
-              <span>Limite {state.settings.anomalyThresholdPercent}%</span>
+              <span>R$ {state.settings.tariffPerKwh.toFixed(2).replace('.', ',')}/kWh</span>
             </button>
             {canMutate && (
               <button type="button" className="btn btn-primary" onClick={onQuickAddRecord}>

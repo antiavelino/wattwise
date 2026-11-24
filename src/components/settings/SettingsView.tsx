@@ -3,12 +3,18 @@ import {
   Check,
   Database,
   FileJson,
+  Info,
+  Moon,
   RotateCcw,
   Sliders,
+  Sun,
   Trash2,
-  UploadCloud,
 } from 'lucide-react';
 import { useWattWise } from '../../context/WattWiseContext';
+import {
+  DEMO_SCENARIO_LIST,
+  OFFICIAL_TARIFF_REFERENCE,
+} from '../../data/demoData';
 import { runEnergyAnalysis } from '../../engine/analysisEngine';
 import {
   formatCurrencyBRL,
@@ -20,27 +26,43 @@ import {
   SettingsValidationErrors,
   validateSettingsInput,
 } from '../../utils/validators';
+import { Badge } from '../common/Badge';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 
 interface SettingsViewProps {
   onOpenMigrationModal?: () => void;
 }
 
-export const SettingsView: React.FC<SettingsViewProps> = ({ onOpenMigrationModal }) => {
+export const SettingsView: React.FC<SettingsViewProps> = () => {
   const {
     state,
     analysis,
     updateSettings,
     restoreDemoData,
     clearOperationalData,
-    legacyMigrationPreview,
-    workspaceMode,
     activeRole,
     pushToast,
+    theme,
+    setTheme,
+    activeScenarioId,
+    activeScenarioMeta,
+    switchScenario,
   } = useWattWise();
 
   const [establishmentName, setEstablishmentName] = useState(state.settings.establishmentName);
   const [tariffRaw, setTariffRaw] = useState(String(state.settings.tariffPerKwh));
+  const [referenceLocation, setReferenceLocation] = useState(
+    state.settings.referenceLocation ?? OFFICIAL_TARIFF_REFERENCE.referenceLocation,
+  );
+  const [consumerClass, setConsumerClass] = useState(
+    state.settings.consumerClass ?? OFFICIAL_TARIFF_REFERENCE.consumerClass,
+  );
+  const [tariffSource, setTariffSource] = useState(
+    state.settings.tariffSource ?? OFFICIAL_TARIFF_REFERENCE.tariffSource,
+  );
+  const [tariffReferenceDate, setTariffReferenceDate] = useState(
+    state.settings.tariffReferenceDate ?? OFFICIAL_TARIFF_REFERENCE.tariffReferenceDate,
+  );
   const [thresholdRaw, setThresholdRaw] = useState(String(state.settings.anomalyThresholdPercent));
   const [errors, setErrors] = useState<SettingsValidationErrors>({});
   const [confirmRestoreOpen, setConfirmRestoreOpen] = useState(false);
@@ -51,6 +73,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onOpenMigrationModal
   useEffect(() => {
     setEstablishmentName(state.settings.establishmentName);
     setTariffRaw(String(state.settings.tariffPerKwh));
+    setReferenceLocation(
+      state.settings.referenceLocation ?? OFFICIAL_TARIFF_REFERENCE.referenceLocation,
+    );
+    setConsumerClass(state.settings.consumerClass ?? OFFICIAL_TARIFF_REFERENCE.consumerClass);
+    setTariffSource(state.settings.tariffSource ?? OFFICIAL_TARIFF_REFERENCE.tariffSource);
+    setTariffReferenceDate(
+      state.settings.tariffReferenceDate ?? OFFICIAL_TARIFF_REFERENCE.tariffReferenceDate,
+    );
     setThresholdRaw(String(state.settings.anomalyThresholdPercent));
     setErrors({});
   }, [state.settings]);
@@ -61,9 +91,22 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onOpenMigrationModal
     return (
       establishmentName.trim() !== state.settings.establishmentName ||
       parsedTariff !== state.settings.tariffPerKwh ||
-      parsedThreshold !== state.settings.anomalyThresholdPercent
+      parsedThreshold !== state.settings.anomalyThresholdPercent ||
+      referenceLocation.trim() !== (state.settings.referenceLocation ?? '') ||
+      consumerClass.trim() !== (state.settings.consumerClass ?? '') ||
+      tariffSource.trim() !== (state.settings.tariffSource ?? '') ||
+      tariffReferenceDate.trim() !== (state.settings.tariffReferenceDate ?? '')
     );
-  }, [establishmentName, tariffRaw, thresholdRaw, state.settings]);
+  }, [
+    establishmentName,
+    tariffRaw,
+    thresholdRaw,
+    referenceLocation,
+    consumerClass,
+    tariffSource,
+    tariffReferenceDate,
+    state.settings,
+  ]);
 
   const livePreview = useMemo(() => {
     const parsedTariff = parseNumericInput(tariffRaw);
@@ -100,27 +143,45 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onOpenMigrationModal
     updateSettings({
       establishmentName: establishmentName.trim(),
       tariffPerKwh: validation.parsedTariff,
+      referenceLocation: referenceLocation.trim(),
+      consumerClass: consumerClass.trim(),
+      tariffSource: tariffSource.trim(),
+      tariffReferenceDate: tariffReferenceDate.trim(),
       anomalyThresholdPercent: validation.parsedThreshold,
     });
   };
 
+  const handleApplyOfficialAneelPreset = () => {
+    setTariffRaw(String(OFFICIAL_TARIFF_REFERENCE.tariffPerKwh));
+    setReferenceLocation(OFFICIAL_TARIFF_REFERENCE.referenceLocation);
+    setConsumerClass(OFFICIAL_TARIFF_REFERENCE.consumerClass);
+    setTariffSource(OFFICIAL_TARIFF_REFERENCE.tariffSource);
+    setTariffReferenceDate(OFFICIAL_TARIFF_REFERENCE.tariffReferenceDate);
+  };
+
   const handleExportCurrentJson = () => {
     triggerFileDownload(
-      `wattwise-dados-${getTodayIsoDate()}.json`,
+      `wattwise-${activeScenarioId}-${getTodayIsoDate()}.json`,
       JSON.stringify(state, null, 2),
       'application/json;charset=utf-8;',
     );
-    pushToast('success', 'Backup JSON exportado', 'Dados salvos no seu computador.');
+    pushToast('success', 'Backup JSON exportado', 'Dados do cenário salvos no seu computador.');
   };
 
   return (
     <div className="settings-layout">
       <section className="panel">
-        <div className="panel-header">
+        <div className="panel-header panel-header--wrap">
           <div>
-            <h2 className="panel-title">Parâmetros do Estabelecimento</h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <h2 className="panel-title">
+                Tarifa de Energia, Localidade e Parâmetros ({activeScenarioMeta.shortLabel})
+              </h2>
+              <Badge tone="emerald">ANEEL B3 Comercial</Badge>
+            </div>
             <p className="panel-subtitle">
-              Ajuste o nome do local, a tarifa de energia e a sensibilidade do motor local de alertas
+              A tarifa definida abaixo atualiza todos os cálculos de custo (R$ = kWh × R$/kWh) deste
+              cenário
             </p>
           </div>
           <Sliders size={18} className="panel-header-icon" aria-hidden="true" />
@@ -143,7 +204,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onOpenMigrationModal
                 }
               }}
               maxLength={80}
-              placeholder="Ex.: Oficina Central Ltda."
+              placeholder="Ex.: Cafeteria Grão & Vapor"
               disabled={!canEditSettings}
             />
             {errors.establishmentName && (
@@ -153,9 +214,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onOpenMigrationModal
 
           <div className="form-grid-2">
             <div className="form-field">
-              <label htmlFor="cfg-tariff" className="form-label">
-                Tarifa de energia (R$ / kWh)
-              </label>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                <label htmlFor="cfg-tariff" className="form-label">
+                  Tarifa de energia (R$ / kWh)
+                </label>
+                <button
+                  type="button"
+                  className="auth-inline-link"
+                  onClick={handleApplyOfficialAneelPreset}
+                  title="Aplicar referência homologada ANEEL Enel SP B3"
+                >
+                  Restaurar Ref. ANEEL (R$ 0,79)
+                </button>
+              </div>
               <input
                 id="cfg-tariff"
                 type="number"
@@ -174,14 +245,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onOpenMigrationModal
                 disabled={!canEditSettings}
               />
               <span className="form-hint">
-                Usada para estimar custo diário, custo mensal e impacto de anomalias.
+                Fórmula aplicada: Custo estimado (R$) = Consumo (kWh) × Tarifa (R$/kWh).
               </span>
               {errors.tariffPerKwh && <span className="form-error">{errors.tariffPerKwh}</span>}
             </div>
 
             <div className="form-field">
               <label htmlFor="cfg-threshold" className="form-label">
-                Limite percentual para alertas (%)
+                Limite percentual para alertas de anomalia (%)
               </label>
               <input
                 id="cfg-threshold"
@@ -218,13 +289,89 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onOpenMigrationModal
                 disabled={!canEditSettings}
                 aria-label="Ajustar limite percentual de alerta"
               />
-              <span className="form-hint">
-                Dispara alerta quando o consumo exceder este percentual sobre a média dos dias
-                anteriores.
-              </span>
               {errors.anomalyThresholdPercent && (
                 <span className="form-error">{errors.anomalyThresholdPercent}</span>
               )}
+            </div>
+          </div>
+
+          <div className="form-grid-2">
+            <div className="form-field">
+              <label htmlFor="cfg-location" className="form-label">
+                Localidade e concessionária de referência
+              </label>
+              <input
+                id="cfg-location"
+                type="text"
+                className="form-input"
+                value={referenceLocation}
+                onChange={(e) => setReferenceLocation(e.target.value)}
+                maxLength={120}
+              />
+            </div>
+
+            <div className="form-field">
+              <label htmlFor="cfg-class" className="form-label">
+                Classe de consumo considerada
+              </label>
+              <input
+                id="cfg-class"
+                type="text"
+                className="form-input"
+                value={consumerClass}
+                onChange={(e) => setConsumerClass(e.target.value)}
+                maxLength={120}
+              />
+            </div>
+          </div>
+
+          <div className="form-grid-2">
+            <div className="form-field">
+              <label htmlFor="cfg-source" className="form-label">
+                Fonte oficial da tarifa
+              </label>
+              <input
+                id="cfg-source"
+                type="text"
+                className="form-input"
+                value={tariffSource}
+                onChange={(e) => setTariffSource(e.target.value)}
+                maxLength={160}
+              />
+            </div>
+
+            <div className="form-field">
+              <label htmlFor="cfg-ref-date" className="form-label">
+                Data / Vigência de referência
+              </label>
+              <input
+                id="cfg-ref-date"
+                type="text"
+                className="form-input"
+                value={tariffReferenceDate}
+                onChange={(e) => setTariffReferenceDate(e.target.value)}
+                maxLength={80}
+              />
+            </div>
+          </div>
+
+          {/* Nota Metodológica Obrigatória (Requisito 4) */}
+          <div className="status-box status-box--info">
+            <div className="status-box-icon">
+              <Info size={18} />
+            </div>
+            <div>
+              <h3 className="status-box-title">
+                O que está e o que não está incluído na tarifa de referência
+              </h3>
+              <p className="status-box-text">
+                {state.settings.tariffTaxNote ?? OFFICIAL_TARIFF_REFERENCE.tariffTaxNote}
+              </p>
+              <p className="status-box-text" style={{ marginTop: 6 }}>
+                <strong>Nota importante:</strong> As estimativas financeiras apresentadas no
+                WattWise são proporcionais ao consumo (kWh × R$/kWh) e <strong>não</strong> devem
+                ser interpretadas como o valor exato de uma fatura fiscal da concessionária.
+              </p>
             </div>
           </div>
 
@@ -233,7 +380,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onOpenMigrationModal
               <span>Anomalias detectadas com este limite</span>
               <strong className="tabular-nums">
                 {livePreview.hasEnoughDataForAnomalies
-                  ? `${livePreview.anomalies.length} alerta(s)`
+                  ? `${livePreview.anomalies.length} anomalia(s)`
                   : 'Histórico insuficiente (< 4 dias)'}
               </strong>
             </div>
@@ -254,131 +401,179 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onOpenMigrationModal
               disabled={!hasChanges || !canEditSettings}
             >
               <Check size={16} />
-              <span>Salvar configurações</span>
+              <span>Salvar configurações do cenário</span>
             </button>
           </div>
         </form>
       </section>
 
-      <section className="panel">
-        <div className="panel-header">
-          <div>
-            <h2 className="panel-title">Migração, Exportação &amp; Dados Demonstrativos</h2>
-            <p className="panel-subtitle">
-              Gerencie importação do LocalStorage, backup em JSON e ambiente demonstrativo isolado
-            </p>
-          </div>
-          <Database size={18} className="panel-header-icon" aria-hidden="true" />
-        </div>
-
-        <div className="data-management-stack">
-          <div className="data-status-summary">
-            <div className="data-status-row">
-              <span>Equipamentos salvos</span>
-              <strong className="tabular-nums">{analysis.totalEquipmentCount}</strong>
+      <div className="view-stack">
+        {/* Preferências Visuais (Tema Claro e Tema Escuro) */}
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <h2 className="panel-title">Preferências Visuais (Tema Claro &amp; Escuro)</h2>
+              <p className="panel-subtitle">
+                Sua escolha é persistida automaticamente no navegador
+              </p>
             </div>
-            <div className="data-status-row">
-              <span>Registros de consumo</span>
-              <strong className="tabular-nums">{analysis.totalRecords}</strong>
-            </div>
-            <div className="data-status-row">
-              <span>Origem atual</span>
-              <strong>
-                {analysis.hasDemoData ? 'Contém dados demonstrativos' : 'Dados próprios do usuário'}
-              </strong>
-            </div>
+            {theme === 'light' ? (
+              <Sun size={18} className="panel-header-icon" />
+            ) : (
+              <Moon size={18} className="panel-header-icon" />
+            )}
           </div>
 
-          {workspaceMode === 'saas' && legacyMigrationPreview.hasLegacyData && onOpenMigrationModal && (
+          <div className="status-toggle-group" role="radiogroup" aria-label="Tema visual">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={theme === 'light'}
+              className={`status-choice ${theme === 'light' ? 'status-choice--active' : ''}`}
+              onClick={() => setTheme('light')}
+            >
+              <Sun size={15} />
+              <span>Modo Claro Profissional</span>
+            </button>
+
+            <button
+              type="button"
+              role="radio"
+              aria-checked={theme === 'dark'}
+              className={`status-choice ${theme === 'dark' ? 'status-choice--active' : ''}`}
+              onClick={() => setTheme('dark')}
+            >
+              <Moon size={15} />
+              <span>Modo Escuro (Eco-Tech)</span>
+            </button>
+          </div>
+        </section>
+
+        {/* Gerenciamento do Cenário Demonstrativo Ativo */}
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <h2 className="panel-title">
+                Gerenciamento do Cenário ({activeScenarioMeta.shortLabel})
+              </h2>
+              <p className="panel-subtitle">
+                Alterne entre os 4 cenários ou restaure os dados originais apenas deste cenário
+              </p>
+            </div>
+            <Database size={18} className="panel-header-icon" aria-hidden="true" />
+          </div>
+
+          <div className="data-management-stack">
+            <div className="form-field">
+              <label htmlFor="cfg-scenario-select" className="form-label">
+                Cenário demonstrativo ativo
+              </label>
+              <select
+                id="cfg-scenario-select"
+                className="form-input"
+                value={activeScenarioId}
+                onChange={(e) => switchScenario(e.target.value as any)}
+              >
+                {DEMO_SCENARIO_LIST.map((sc) => (
+                  <option key={sc.id} value={sc.id}>
+                    {sc.shortLabel} — {sc.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="data-status-summary">
+              <div className="data-status-row">
+                <span>Cenário isolado atual</span>
+                <strong>{activeScenarioMeta.name}</strong>
+              </div>
+              <div className="data-status-row">
+                <span>Equipamentos cadastrados</span>
+                <strong className="tabular-nums">{analysis.totalEquipmentCount}</strong>
+              </div>
+              <div className="data-status-row">
+                <span>Registros diários</span>
+                <strong className="tabular-nums">{analysis.totalRecords}</strong>
+              </div>
+              <div className="data-status-row">
+                <span>Chave LocalStorage</span>
+                <code>wattwise_v3_scenario_{activeScenarioId}</code>
+              </div>
+            </div>
+
             <div className="action-card">
               <div>
                 <h3 className="action-card-title">
-                  Migrar dados anteriores do navegador (LocalStorage v1)
+                  Restaurar cenário {activeScenarioMeta.shortLabel}
                 </h3>
                 <p className="action-card-desc">
-                  Detectamos {legacyMigrationPreview.equipmentCount} equipamento(s) e{' '}
-                  {legacyMigrationPreview.recordsCount} registro(s) salvos localmente no navegador.
-                  Importe-os com segurança e sem duplicidades para esta organização.
+                  Recarrega os equipamentos comerciais reais, a tarifa de referência ANEEL e os 65
+                  dias de histórico simulado apenas para{' '}
+                  <strong>{activeScenarioMeta.shortLabel}</strong>, sem apagar ou modificar os
+                  outros três cenários.
                 </p>
               </div>
               <button
                 type="button"
-                className="btn btn-primary"
-                onClick={onOpenMigrationModal}
+                className="btn btn-secondary"
+                onClick={() => setConfirmRestoreOpen(true)}
               >
-                <UploadCloud size={15} />
-                <span>Abrir assistente de migração</span>
+                <RotateCcw size={15} />
+                <span>Restaurar {activeScenarioMeta.shortLabel}</span>
               </button>
             </div>
-          )}
 
-          <div className="action-card">
-            <div>
-              <h3 className="action-card-title">Exportar dados em JSON</h3>
-              <p className="action-card-desc">
-                Baixe uma cópia completa dos equipamentos, leituras e configurações atuais em
-                formato JSON aberto.
-              </p>
+            <div className="action-card">
+              <div>
+                <h3 className="action-card-title">Exportar cenário em JSON</h3>
+                <p className="action-card-desc">
+                  Baixe uma cópia completa dos equipamentos, leituras e configurações deste cenário
+                  em formato JSON aberto.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={handleExportCurrentJson}
+              >
+                <FileJson size={15} />
+                <span>Exportar JSON</span>
+              </button>
             </div>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={handleExportCurrentJson}
-            >
-              <FileJson size={15} />
-              <span>Exportar JSON</span>
-            </button>
-          </div>
 
-          <div className="action-card">
-            <div>
-              <h3 className="action-card-title">Restaurar dados demonstrativos</h3>
-              <p className="action-card-desc">
-                Abre o ambiente demonstrativo isolado com o cenário fictício de uma pequena empresa
-                (8 equipamentos, 16 dias de consumo e 2 anomalias identificáveis), sem misturar com
-                organizações reais.
-              </p>
+            <div className="action-card action-card--danger">
+              <div>
+                <h3 className="action-card-title">
+                  Limpar registros e equipamentos deste cenário
+                </h3>
+                <p className="action-card-desc">
+                  Remove os equipamentos e leituras apenas do cenário{' '}
+                  <strong>{activeScenarioMeta.shortLabel}</strong> para testar o comportamento do
+                  sistema sem dados.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn btn-danger-outline"
+                onClick={() => setConfirmClearOpen(true)}
+                disabled={
+                  (analysis.totalEquipmentCount === 0 && analysis.totalRecords === 0) ||
+                  !canEditSettings
+                }
+              >
+                <Trash2 size={15} />
+                <span>Limpar dados de {activeScenarioMeta.shortLabel}</span>
+              </button>
             </div>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => setConfirmRestoreOpen(true)}
-            >
-              <RotateCcw size={15} />
-              <span>Restaurar demonstração</span>
-            </button>
           </div>
-
-          <div className="action-card action-card--danger">
-            <div>
-              <h3 className="action-card-title">Limpar registros e equipamentos</h3>
-              <p className="action-card-desc">
-                Remove todos os equipamentos e leituras diárias do ambiente atual para iniciar com
-                seus dados reais do zero (mantém o nome do estabelecimento, tarifa e limite de
-                alerta).
-              </p>
-            </div>
-            <button
-              type="button"
-              className="btn btn-danger-outline"
-              onClick={() => setConfirmClearOpen(true)}
-              disabled={
-                (analysis.totalEquipmentCount === 0 && analysis.totalRecords === 0) ||
-                !canEditSettings
-              }
-            >
-              <Trash2 size={15} />
-              <span>Limpar dados</span>
-            </button>
-          </div>
-        </div>
-      </section>
+        </section>
+      </div>
 
       <ConfirmDialog
         isOpen={confirmRestoreOpen}
-        title="Restaurar dados demonstrativos?"
-        description="Esta ação carregará o conjunto demonstrativo padrão (8 equipamentos e 16 dias simulados) no sandbox demonstrativo."
-        confirmLabel="Restaurar dados demo"
+        title={`Restaurar cenário ${activeScenarioMeta.shortLabel}?`}
+        description={`Esta ação restaurará os equipamentos verificados e os 65 dias simulados apenas do cenário "${activeScenarioMeta.name}". Os demais cenários não serão afetados.`}
+        confirmLabel={`Restaurar ${activeScenarioMeta.shortLabel}`}
         variant="primary"
         onConfirm={() => {
           restoreDemoData();
@@ -389,9 +584,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onOpenMigrationModal
 
       <ConfirmDialog
         isOpen={confirmClearOpen}
-        title="Limpar todos os equipamentos e registros?"
-        description="Todos os equipamentos e registros diários do ambiente atual serão apagados. Você poderá restaurar os dados demonstrativos novamente quando quiser."
-        confirmLabel="Limpar tudo"
+        title={`Limpar dados de ${activeScenarioMeta.shortLabel}?`}
+        description={`Todos os equipamentos e registros diários do cenário ${activeScenarioMeta.shortLabel} serão removidos. Os outros três cenários continuarão salvos normalmente.`}
+        confirmLabel="Limpar cenário atual"
         variant="danger"
         onConfirm={() => {
           clearOperationalData();
